@@ -8331,7 +8331,7 @@
   )
 
   (symbol (lib_id "Device:R") (at 24.765 111.125 180) (unit 1)
-    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 122378e9-1318-4a26-a686-4e992eee41fb)
     (property "Reference" "R38" (at 26.543 110.49 0)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -8614,7 +8614,7 @@
   )
 
   (symbol (lib_id "Connector_Generic:Conn_01x04") (at 250.444 147.955 180) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 2698ce68-9b2a-4fa0-9bde-1aba3eda6c40)
     (property "Reference" "J5" (at 250.444 137.541 0)
       (effects (font (size 1.27 1.27)) hide)
@@ -8673,7 +8673,7 @@
   )
 
   (symbol (lib_id "Device:R") (at 320.421 63.627 0) (mirror x) (unit 1)
-    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 2d667fe9-9c01-491c-bf62-fcc6014644e5)
     (property "Reference" "R38" (at 318.643 62.992 0)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -9350,7 +9350,7 @@
     (property "Datasheet" "http://portal.fciconnect.com/Comergent//fci/drawing/10067847.pdf" (at 102.489 110.617 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "LCSC" "C961683" (at 102.489 110.617 0)
+    (property "LCSC" "C444917" (at 102.489 110.617 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (pin "1" (uuid 1cffcaf2-c7a3-4d74-8bd4-184c157c35af))
@@ -9376,7 +9376,7 @@
   )
 
   (symbol (lib_id "Device:R") (at 42.545 111.125 180) (unit 1)
-    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 77342671-9996-48fe-b618-49c6a06e46b5)
     (property "Reference" "R38" (at 44.323 110.49 0)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -10043,7 +10043,7 @@
   )
 
   (symbol (lib_id "Device:R") (at 73.66 118.237 270) (unit 1)
-    (in_bom no) (on_board yes) (dnp no)
+    (in_bom yes) (on_board yes) (dnp no)
     (uuid ba470291-e73b-4c7e-b3a0-a2204def24ed)
     (property "Reference" "R38" (at 74.93 120.777 90)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -10107,7 +10107,7 @@
   )
 
   (symbol (lib_id "Connector_Generic:Conn_01x03") (at 221.361 137.287 180) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid bd7a60a9-8cfb-47c8-ac70-04a45ab93d69)
     (property "Reference" "J3" (at 221.361 132.715 0)
       (effects (font (size 1.27 1.27)))
@@ -10261,7 +10261,7 @@
   )
 
   (symbol (lib_id "Connector_Generic:Conn_01x03") (at 221.361 147.447 180) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid cc8d8c91-5bf7-4691-a055-61a9bbe07407)
     (property "Reference" "J4" (at 221.361 142.875 0)
       (effects (font (size 1.27 1.27)))
