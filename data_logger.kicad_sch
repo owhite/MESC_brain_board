@@ -8488,7 +8488,7 @@
   )
 
   (symbol (lib_id "Feather-NEO-M9N-GPS-rescue:U.FL-SamacSys_Parts") (at 51.435 173.355 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom no) (on_board yes) (dnp no)
     (uuid 1cffae74-d6b3-44e9-b413-eac95714f2ce)
     (property "Reference" "ANT1" (at 60.325 144.145 0)
       (effects (font (size 1.27 1.27)))
@@ -10544,7 +10544,7 @@
   )
 
   (symbol (lib_id "Feather-NEO-M9N-GPS-rescue:u-blox_NEO-M9N-RF_GPS") (at 109.855 159.385 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom no) (on_board yes) (dnp no)
     (uuid f28acc8a-0ce7-470d-a9ed-f5ee228eb0fc)
     (property "Reference" "U1" (at 108.585 135.255 0)
       (effects (font (size 1.27 1.27)))
