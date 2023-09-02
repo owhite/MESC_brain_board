@@ -5,7 +5,6 @@
 #include <string.h>
 #include "tones.h"
 #include "SparkFun_Ublox_Arduino_Library.h" 
-#include <MicroNMEA.h> 
 
 #define compSerial Serial // data from computer keyboard to teensy USB
 #define MP2Serial Serial2 // data from MP2 to teensy
@@ -18,24 +17,17 @@
 
 // GPS
 SFE_UBLOX_GPS myGPS;
-char nmeaBuffer[100];
-MicroNMEA nmea(nmeaBuffer, sizeof(nmeaBuffer));
-
 #define GPS_BLINK_PIN 23
 
-long latitude_mdeg = nmea.getLatitude();
-long longitude_mdeg = nmea.getLongitude();
-uint32_t satellite_num = 0;
-
-boolean  GPS_blinkOn = false;
-boolean  GPS_blinkFlag = false;
+boolean  GPS_blinkOn = true;
+boolean  GPS_blinkFlag = true;
 uint32_t GPS_blinkFactor = 1;
 uint32_t GPS_blinkDelta = 0;
-uint32_t GPS_blinkInterval = 800; 
+uint32_t GPS_blinkInterval = 300; 
 uint32_t GPS_blinkNow;
 
 uint32_t GPS_checkDelta = 0;
-uint32_t GPS_checkInterval = 800; 
+uint32_t GPS_checkInterval = 100; 
 uint32_t GPS_checkNow;
 
 // sound
@@ -152,22 +144,6 @@ void loop() {
     break;
   case CHECK_GPS:
     {
-      compSerial.print("Num. satellites: ");
-      compSerial.println(satellite_num);
-      BTSerial.print("Num. satellites: ");
-      BTSerial.println(satellite_num);
-
-      if(nmea.isValid() == true) {
-	compSerial.print("\nLatitude (deg): ");
-	compSerial.println(latitude_mdeg / 1000000., 6);
-	compSerial.print("Longitude (deg): ");
-	compSerial.println(longitude_mdeg / 1000000., 6);
-
-	BTSerial.print("\nLatitude (deg): ");
-	BTSerial.println(latitude_mdeg / 1000000., 6);
-	BTSerial.print("Longitude (deg): ");
-	BTSerial.println(longitude_mdeg / 1000000., 6);
-      }
       state = IDLE;
     }
     break;
@@ -257,12 +233,8 @@ void loop() {
 	  // addFloatElementToJSON(receivedChars[MP2], "angle", roll);
 	  // addIntElementToJSON(receivedChars[MP2], "time", millis() - recordTime);
 
-	  if(nmea.isValid() == true) {
-	    long latitude_mdeg = nmea.getLatitude();
-	    long longitude_mdeg = nmea.getLongitude();
-	    addFloatElementToJSON(receivedChars[MP2], "lat", latitude_mdeg / 1000000.);
-	    addFloatElementToJSON(receivedChars[MP2], "long", longitude_mdeg / 1000000.);
-	  }
+	  // addFloatElementToJSON(receivedChars[MP2], "lat", latitude_mdeg / 1000000.);
+	  // addFloatElementToJSON(receivedChars[MP2], "long", longitude_mdeg / 1000000.);
 
 	  // write the old string
 	  strcpy(oldStr, receivedChars[MP2]);
@@ -619,6 +591,19 @@ void handleBlink() {
   else {
     digitalWrite(EXT_BLINK_PIN, LOW);
   }
+
+  // GPS LED
+  GPS_blinkNow = millis();
+  if (GPS_blinkFlag) {
+    if ((GPS_blinkNow - GPS_blinkDelta) > GPS_blinkInterval / GPS_blinkFactor) {
+      digitalWrite(GPS_BLINK_PIN, GPS_blinkOn);
+      GPS_blinkOn = !GPS_blinkOn;
+      GPS_blinkDelta = GPS_blinkNow;
+    }
+  }
+  else {
+    digitalWrite(GPS_BLINK_PIN, HIGH);
+  }
 }
 
 void handleGPS() {
@@ -628,25 +613,39 @@ void handleGPS() {
   }
   GPS_checkDelta = GPS_checkNow;
 
+  long latitude = myGPS.getLatitude();
+  // Serial.print(F("Lat: "));
+  // Serial.print(latitude / 10000000., 6);
 
-  satellite_num = nmea.getNumSatellites();
+  long longitude = myGPS.getLongitude();
+  // Serial.print(F(" Long: "));
+  // Serial.print(longitude / 10000000., 6);
 
-  myGPS.checkUblox(); 
+  int SIV = myGPS.getSIV();
+  // Serial.print(F(" SIV: "));
+  // Serial.print(SIV);
 
-  if (satellite_num == 0) {
+  int day = myGPS.getDay();
+  // Serial.print(F(" day: "));
+  // Serial.print(day);
+
+  int sec = myGPS.getSecond();
+  // Serial.print(F(" second: "));
+  // Serial.print(sec);
+
+  if (SIV == 0) {
     GPS_blinkFlag = false; // just stays on until a satellite locks
   }
   else {
     GPS_blinkFlag = true; 
   }
   GPS_blinkFactor = 5;
-  if (satellite_num < 5) {
-    GPS_blinkFactor = satellite_num;
+  if (SIV < 5) {
+    GPS_blinkFactor = SIV;
   }
 
-  if(nmea.isValid() == true)
-  {
-    latitude_mdeg = nmea.getLatitude();
-    longitude_mdeg = nmea.getLongitude();
-  }
+  // Serial.print(F(" BF: "));
+  // Serial.print(GPS_blinkFactor);
+
+  Serial.println();
 }
