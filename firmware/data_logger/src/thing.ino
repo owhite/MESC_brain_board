@@ -4,48 +4,55 @@
 #include <SPI.h>
 #include <string.h>
 #include "tones.h"
+#include "SparkFun_Ublox_Arduino_Library.h" 
+#include <MicroNMEA.h> 
 
 #define compSerial Serial // data from computer keyboard to teensy USB
-#define BTSerial  Serial2 // data from ESP32 to teensy UART
-#define MP2Serial Serial3 // data from MP2 to teensy
-#define GPSSerial Serial4 // data from GPS to teensy
+#define MP2Serial Serial2 // data from MP2 to teensy
+#define BTSerial  Serial3 // data from ESP32 to teensy UART
+#define BAUDRATE 115200
 
 #define COMP 0
 #define BT   1
 #define MP2  2
-#define GPS  3
+
+// GPS
+SFE_UBLOX_GPS myGPS;
+char nmeaBuffer[100];
+MicroNMEA nmea(nmeaBuffer, sizeof(nmeaBuffer));
+
+#define GPS_BLINK_PIN 23
+
+long latitude_mdeg = nmea.getLatitude();
+long longitude_mdeg = nmea.getLongitude();
+uint32_t satellite_num = 0;
+
+boolean  GPS_blinkOn = false;
+boolean  GPS_blinkFlag = false;
+uint32_t GPS_blinkFactor = 1;
+uint32_t GPS_blinkDelta = 0;
+uint32_t GPS_blinkInterval = 800; 
+uint32_t GPS_blinkNow;
+
+uint32_t GPS_checkDelta = 0;
+uint32_t GPS_checkInterval = 800; 
+uint32_t GPS_checkNow;
 
 // sound
-#define SPK_PIN 3
+#define SPK_PIN 9
 int melody[] = { NOTE_G5, NOTE_G5, NOTE_C6, NOTE_C6, NOTE_C6, NOTE_G5 };
 int noteDurations[] = { 125, 125, 64, 125, 125, 64 };
 
-// MPU setup
-double gyro_x, gyro_y, gyro_z;
-double gyro_x_error, gyro_y_error, gyro_z_error;
-double gyro_x_sum, gyro_y_sum, gyro_z_sum;
-unsigned long cycle_start;
-double dT = .002;
-double dPitch, dRoll;
-double acc_x, acc_y, acc_z;
-double acc_pitch, acc_roll, acc_magnitude;
-double acc_pitch_error, acc_roll_error;
-double pitch, roll;
-double pitch_feedback_error, roll_feedback_error;
-double desired_pitch, desired_roll;
-double acc_magnitude_sum, acc_magnitude_initial;
-double servo_roll, servo_pitch;
-int average_cycle_count = 2000;
-
 // single letter commands
 #define BLINK         'b'
-#define MPU           'm'
 #define GET           'g'
 #define COMMAND       'c'
 #define END           'e' // stops record
 #define RECORD        'r'
 #define TONE          't' // play a sound
 #define FILES         'f' // show files
+#define MPU           'm'
+#define GPS           'p' // p, for planet!
 #define SAVE          's' 
 #define HELP          'h' 
 
@@ -57,8 +64,9 @@ int average_cycle_count = 2000;
 #define STOP_RECORD        4
 #define SET_MPU            5
 #define CHECK_MPU          6
-#define BT_RECV_LINES     7
-#define SHOW_FILES         8
+#define CHECK_GPS          7
+#define BT_RECV_LINES      8
+#define SHOW_FILES         9
 
 uint8_t state = IDLE;
 
@@ -81,6 +89,8 @@ bool lineWasRecvd[4] = {false, false, false, false};
 uint32_t serInterval = 300;  // timeout to receive character from MP2
 
 // blinking stuff
+#define EXT_BLINK_PIN 16
+#define BT_BLINK_PIN 5
 boolean blinkOn = false;
 boolean blinkFlag = false;
 uint32_t blinkDelta = 0;
@@ -93,56 +103,34 @@ char SD_card_name[25];
 File dataFile;
 const int chipSelect = BUILTIN_SDCARD;
 
-// GPS
-struct GPS_s{
-  char GPS_valid[2];
-  float GPS_lat;
-  float GPS_long;
-  bool success;
-};
-
-struct GPS_s g_struct;
-
-#define EXT_BLINK_PIN 2
-
 void setup() {
-  Wire.begin();
-  delay(100);
-  compSerial.begin(115200);
-  BTSerial.begin(115200);
-  MP2Serial.begin(115200);
-  GPSSerial.begin(9600);
+  compSerial.begin(BAUDRATE);
+  BTSerial.begin(BAUDRATE);
+  MP2Serial.begin(BAUDRATE);
 
   pinMode(EXT_BLINK_PIN, OUTPUT); 
-
-  setup_mpu_6050_registers(); //setup the registers
-
-  compSerial.println("Calibrating Gyro");
-  BTSerial.println("Calibrating Gyro");
-  calculate_gyro_error(); 
-  compSerial.println("Gyro Calibration Complete"); 
-  BTSerial.println("Gyro Calibration Complete"); 
-
-  compSerial.println("Calibrating Accelerometer");
-  BTSerial.println("Calibrating Accelerometer");
-  calculuate_accelerometer_error(); 
-  compSerial.println("Accelerometer Calibration Complete");
-  BTSerial.println("Accelerometer Calibration Complete");
+  pinMode(GPS_BLINK_PIN, OUTPUT); 
 
   if (!SD.begin(chipSelect)) {
     compSerial.println("Card failed, or not present");
   }
   compSerial.println("SD card initialized");
 
-  BTSerial.println("Data Logger Calibration Complete");
+  Wire.begin();
+
+  if (myGPS.begin() == false)
+  {
+    Serial.println(F("Ublox GPS not detected at default I2C address. Please check wiring. Freezing."));
+    while (1);
+  }
 
   clrSerialString(COMP);
   clrSerialString(BT);
 }
 
 void loop() {
-  handleMPU();
   handleBlink();
+  handleGPS();
 
   if (recvSerialData(compSerial, COMP) != 0) {
     processCommand(COMP); 
@@ -152,39 +140,34 @@ void loop() {
     processCommand(BT); 
   }
 
-  if (recvSerialData(GPSSerial, GPS) != 0) {
-    // compSerial.println(receivedChars[GPS]);
-    // strcpy(receivedChars[GPS], "$GPRMC,005944.000,A,3918.2722,N,07636.7732,W,0.25,0.55,120723,,,A*71");
-    g_struct = processGPSString(receivedChars[GPS]);
-    clrSerialString(GPS); // delete string but g_struct remains
-  }
-
   switch (state) {
   case CHECK_MPU:
     {
       compSerial.print("pitch :: ");
-      compSerial.print(pitch);
       compSerial.print(" :: roll :: ");
-      compSerial.println(roll);
-
       BTSerial.print("pitch :: ");
-      BTSerial.print((char) pitch);
       BTSerial.print(" :: roll :: ");
-      BTSerial.println((char) roll);
+      delay(100);
+    }
+    break;
+  case CHECK_GPS:
+    {
+      compSerial.print("Num. satellites: ");
+      compSerial.println(satellite_num);
+      BTSerial.print("Num. satellites: ");
+      BTSerial.println(satellite_num);
 
-      compSerial.print("lat/long :: ");
-      compSerial.print(g_struct.GPS_valid);
-      compSerial.print(" :: ");
-      compSerial.print(g_struct.GPS_lat);
-      compSerial.print(" :: ");
-      compSerial.println(g_struct.GPS_long);
+      if(nmea.isValid() == true) {
+	compSerial.print("\nLatitude (deg): ");
+	compSerial.println(latitude_mdeg / 1000000., 6);
+	compSerial.print("Longitude (deg): ");
+	compSerial.println(longitude_mdeg / 1000000., 6);
 
-      BTSerial.print("lat/long :: ");
-      BTSerial.print(g_struct.GPS_valid);
-      BTSerial.print(" :: ");
-      BTSerial.print(g_struct.GPS_lat);
-      BTSerial.print(" :: ");
-      BTSerial.println(g_struct.GPS_long);
+	BTSerial.print("\nLatitude (deg): ");
+	BTSerial.println(latitude_mdeg / 1000000., 6);
+	BTSerial.print("Longitude (deg): ");
+	BTSerial.println(longitude_mdeg / 1000000., 6);
+      }
       state = IDLE;
     }
     break;
@@ -271,11 +254,15 @@ void loop() {
 	if (strlen(receivedChars[MP2]) > 0) {
 	  // addFloatElementToJSON(receivedChars[MP2], "pitch", pitch);
 	  // the roll is useful for current mount of logger to bike
-	  addFloatElementToJSON(receivedChars[MP2], "angle", roll);
-	  addIntElementToJSON(receivedChars[MP2], "time", millis() - recordTime);
+	  // addFloatElementToJSON(receivedChars[MP2], "angle", roll);
+	  // addIntElementToJSON(receivedChars[MP2], "time", millis() - recordTime);
 
-	  addFloatElementToJSON(receivedChars[MP2], "lat", g_struct.GPS_lat);
-	  addFloatElementToJSON(receivedChars[MP2], "long", g_struct.GPS_long);
+	  if(nmea.isValid() == true) {
+	    long latitude_mdeg = nmea.getLatitude();
+	    long longitude_mdeg = nmea.getLongitude();
+	    addFloatElementToJSON(receivedChars[MP2], "lat", latitude_mdeg / 1000000.);
+	    addFloatElementToJSON(receivedChars[MP2], "long", longitude_mdeg / 1000000.);
+	  }
 
 	  // write the old string
 	  strcpy(oldStr, receivedChars[MP2]);
@@ -301,7 +288,7 @@ void loop() {
     break;
   case STOP_RECORD:
     {
-      compSerial.println("process:: status stop");
+      compSerial.println("process :: status stop");
       MP2Serial.write("status stop\r\n");
 
       dataFile.print(oldStr);
@@ -332,9 +319,6 @@ void loop() {
   default:
     break;
   }
-
-  // blocks until MPU is ready. 
-  while(((micros() - cycle_start) / 1000000.0) < dT);
 }
 
 void printDirectory(File dir, int numTabs) {
@@ -419,14 +403,14 @@ void processCommand(int serNum) {
   
   switch (cmd) {
   case BLINK:
-    compSerial.println("process:: BLINK!");
+    compSerial.println("process :: BLINK!");
     BTSerial.println("...blink");
     // BTSerial.println("...blink");
     blinkFlag = !blinkFlag;
     state = IDLE;
     break;
   case TONE:
-    compSerial.println("process:: tone");
+    compSerial.println("process :: tone");
     BTSerial.println("...tone");
     startTone();
     state = IDLE;
@@ -454,24 +438,31 @@ void processCommand(int serNum) {
     state = INIT_RECORD;
     break;
   case GET:
-    compSerial.println("process:: get");
+    compSerial.println("process :: get");
     MP2Serial.write("get\r\n");
     state = BT_RECV_LINES;
     break;
   case FILES:
-    compSerial.println("process:: showfiles");
+    compSerial.println("process :: showfiles");
     state = SHOW_FILES;
     break;
   case SAVE:
-    compSerial.println("process:: save");
+    compSerial.println("process :: save");
     MP2Serial.write("save\r\n");
     state = BT_RECV_LINES;
     break;
   case MPU:
-    compSerial.println("process:: showing MPU");
+    compSerial.println("process :: showing MPU");
     state = CHECK_MPU;
     compSerial.println("Level the bike");
     BTSerial.println("Level the bike");
+    delay(400);
+    break;
+  case GPS:
+    compSerial.println("process :: showing GPS");
+    state = CHECK_GPS;
+    compSerial.println("reading the GPS");
+    BTSerial.println("reading the GPS");
     delay(400);
     break;
   case COMMAND:
@@ -630,144 +621,32 @@ void handleBlink() {
   }
 }
 
-struct GPS_s processGPSString(char *str) {
-  struct GPS_s g;
-
-  g.success = false;
-
-  if (strstr(receivedChars[GPS], "$GPRMC") != NULL) {
-    g.success = true;
-
-    int pos = 0;
-
-    char *r = strdup(str);
-    char *tok = r, *end = r;
-
-    while (tok != NULL) {
-      strsep(&end, ",");
-
-      if (pos == 2) {
-	strncpy(g.GPS_valid, tok, 1);
-	g.GPS_valid[1] = '\0';
-      }
-      if (pos == 3) {
-	g.GPS_lat = atof(tok);
-      }
-      if (pos == 5) {
-	g.GPS_long = atof(tok);
-      }
-
-      tok = end;
-      pos++;
-    }
-    
-    free(r);
+void handleGPS() {
+  GPS_checkNow = millis();
+  if ((GPS_checkNow - GPS_checkDelta) < GPS_checkInterval) {
+    return;
   }
-  return g;
-}
+  GPS_checkDelta = GPS_checkNow;
 
-// https://forum.pjrc.com/threads/61755-TEENSY-4-0-reading-wrong-data-on-GY-521-MPU6050-Breakout-Board
-void handleMPU() {
-  cycle_start = micros();
-  read_mpu_6050_data(); 
-  calculate_pitch_roll(); 
-}
 
-void setup_mpu_6050_registers(){
-  Wire.beginTransmission(0x68);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission(true);
-}
+  satellite_num = nmea.getNumSatellites();
 
-void read_mpu_6050_data(){
-  Wire.beginTransmission(0x68);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 6, true);
+  myGPS.checkUblox(); 
 
-  //Store accelerometer values and divide by 16384 as per the datasheet
-  acc_x = (int16_t)(Wire.read() << 8 | Wire.read()) / 16384.0;
-  acc_y = (int16_t)(Wire.read() << 8 | Wire.read()) / 16384.0;                                 
-  acc_z = (int16_t)(Wire.read() << 8 | Wire.read()) / 16384.0;
-  acc_magnitude = sqrt(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z);
-
-  Wire.beginTransmission(0x68);
-  Wire.write(0x43);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 6, true);
-
-  // per the datasheet to convert to degrees/sec
-  //  store gyroscope values, divide by 131.0 as 
-  gyro_x = (int16_t)(Wire.read() << 8 | Wire.read()) / 131.0 - gyro_x_error;
-  gyro_y = (int16_t)(Wire.read() << 8 | Wire.read()) / 131.0 - gyro_y_error;
-  gyro_z = (int16_t)(Wire.read() << 8 | Wire.read()) / 131.0 - gyro_z_error;
-}
-
-// Calculate the average initial gyroscope values to find the error
-// Supposed to be 0 deg/sec because it is initially at rest
-// This allows us to eliminate drift along the roll and pitch axes
-void calculate_gyro_error(){
-  //average_cycle_count cycles
-  for (int cal_int = 0; cal_int < average_cycle_count; cal_int++){ 
-    read_mpu_6050_data(); //Retrieve gyro data
-    gyro_x_sum += gyro_x; //sum the values
-    gyro_y_sum += gyro_y;
-    gyro_z_sum += gyro_z;
-
-    delay(2);
-  }
-
-  //divide by average_cycle_count to get average deg/sec
-  gyro_x_error = gyro_x_sum / average_cycle_count; 
-  gyro_y_error = gyro_y_sum / average_cycle_count;
-  gyro_z_error = gyro_z_sum / average_cycle_count;
-}
-
-//Calculate average initial accelerometer pitch and roll values
-// this is error since we take the startup position to be 0
-// on the pitch and roll axes
-void calculuate_accelerometer_error(){
-  
-  for (int cal_acc_int = 0; cal_acc_int < average_cycle_count; cal_acc_int++){
-    
-    read_mpu_6050_data(); //get the accelerometer data
-
-    //sum the accelerometer pitch and roll angles in degrees
-    acc_pitch_error += (atan(acc_y / sqrt(pow(acc_z, 2) + pow(acc_x, 2))) * 180 / PI); 
-    acc_roll_error += (atan(-1 * acc_z / sqrt(pow(acc_y, 2) + pow(acc_x, 2))) * 180 / PI);
-    acc_magnitude_sum += acc_magnitude;
-
-    delay(2);
-  }
-
-  //divide by average_cycle_count to get the average pitch and roll values
-  acc_pitch_error /= average_cycle_count; 
-  acc_roll_error /= average_cycle_count;
-  acc_magnitude_initial = acc_magnitude_sum / average_cycle_count;
-}
-
-//Calculuate pitch and roll values
-void calculate_pitch_roll(){
-  dPitch = gyro_z * dT; //small change in angle for each cycle
-  dRoll = gyro_y * dT;
-
-  //Accelerometer-based calculations
-  acc_pitch = (atan(acc_y / sqrt(pow(acc_z, 2) + pow(acc_x, 2))) * 180 / PI) - acc_pitch_error; 
-  //calculate pitch and roll values according to accelerometer and subtract the error
-  acc_roll = (atan(-1 * acc_z / sqrt(pow(acc_y, 2) + pow(acc_x, 2))) * 180 / PI) - acc_roll_error;
-
-  //Calculating the final pitch and roll values
-  if (abs(acc_magnitude - acc_magnitude_initial) <= .01){
-    //adding the small change in pitch and roll
-    pitch = (pitch + dPitch) *.97 + acc_pitch * .03; 
-    //gyro values are more precise but accel helps to eliminate drift
-    roll = (roll + dRoll) * .97 + acc_roll * .03; 
+  if (satellite_num == 0) {
+    GPS_blinkFlag = false; // just stays on until a satellite locks
   }
   else {
-    pitch = (pitch + dPitch);
-    roll = (roll + dRoll);
+    GPS_blinkFlag = true; 
+  }
+  GPS_blinkFactor = 5;
+  if (satellite_num < 5) {
+    GPS_blinkFactor = satellite_num;
+  }
+
+  if(nmea.isValid() == true)
+  {
+    latitude_mdeg = nmea.getLatitude();
+    longitude_mdeg = nmea.getLongitude();
   }
 }
-
-

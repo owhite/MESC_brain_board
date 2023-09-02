@@ -1,0 +1,105 @@
+#include <Wire.h> //Needed for I2C to GPS
+#include <SD.h>
+#include <SPI.h>
+#include "SparkFun_Ublox_Arduino_Library.h" 
+#include <MicroNMEA.h> //http://librarymanager/All#MicroNMEA
+
+// SD card stuff
+char SD_card_name[25];
+File dataFile;
+const int chipSelect = BUILTIN_SDCARD;
+
+SFE_UBLOX_GPS myGPS;
+char nmeaBuffer[100];
+MicroNMEA nmea(nmeaBuffer, sizeof(nmeaBuffer));
+
+#define GPS_BLINK_PIN 23
+
+boolean  GPS_blinkOn = false;
+boolean  GPS_blinkFlag = false;
+uint32_t GPS_blinkFactor = 1;
+uint32_t GPS_blinkDelta = 0;
+uint32_t GPS_blinkInterval = 800; 
+uint32_t GPS_blinkNow;
+
+uint32_t GPS_checkDelta = 0;
+uint32_t GPS_checkInterval = 800; 
+uint32_t GPS_checkNow;
+
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println("SparkFun Ublox Example");
+
+  pinMode(GPS_BLINK_PIN, OUTPUT); 
+
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+  }
+  Serial.println("SD card initialized");
+
+  Wire.begin();
+
+  if (myGPS.begin() == false) {
+    Serial.println(F("Ublox GPS not detected"));
+    while (1);
+  }
+}
+
+void loop()
+{
+  handleBlink();
+  handleGPS();
+}
+
+void handleGPS() {
+  GPS_checkNow = millis();
+  if ((GPS_checkNow - GPS_checkDelta) < GPS_checkInterval) {
+    return;
+  }
+  GPS_checkDelta = GPS_checkNow;
+
+  myGPS.checkUblox();
+  
+  if (nmea.getNumSatellites() == 0) {
+    GPS_blinkFlag = false; // just stays on until a satellite locks
+  }
+  else {
+    GPS_blinkFlag = true; 
+  }
+  GPS_blinkFactor = 5;
+  if (nmea.getNumSatellites() < 5) {
+    GPS_blinkFactor = nmea.getNumSatellites();
+  }
+
+  Serial.print("Num. satellites: ");
+  Serial.print(nmea.getNumSatellites());
+  Serial.print(" :: ");
+  Serial.println(GPS_blinkFactor);
+
+  if(nmea.isValid() == true) {
+    long latitude_mdeg = nmea.getLatitude();
+    long longitude_mdeg = nmea.getLongitude();
+
+    Serial.print("\nLatitude (deg): ");
+    Serial.println(latitude_mdeg / 1000000., 6);
+    Serial.print("Longitude (deg): ");
+    Serial.println(longitude_mdeg / 1000000., 6);
+  }
+}
+
+void handleBlink() {
+  GPS_blinkNow = millis();
+
+  if (GPS_blinkFlag) {
+    if ((GPS_blinkNow - GPS_blinkDelta) > GPS_blinkInterval / GPS_blinkFactor) {
+      digitalWrite(GPS_BLINK_PIN, GPS_blinkOn);
+      GPS_blinkOn = !GPS_blinkOn;
+      GPS_blinkDelta = GPS_blinkNow;
+    }
+  }
+  else {
+    digitalWrite(GPS_BLINK_PIN, HIGH);
+  }
+}
+

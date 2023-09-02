@@ -1,0 +1,33 @@
+{
+    "name": "RedBot-BoosterPack", 
+    "repository": {
+        "url": "https://github.com/zlalanne/redbot-boosterpack.git", 
+        "type": "git"
+    }, 
+    "platforms": [
+        "timsp430"
+    ], 
+    "frameworks": [
+        "energia"
+    ], 
+    "version": "bc5921a473", 
+    "export": {
+        "include": "Firmware/RedBot"
+    }, 
+    "examples": "Firmware/RedBot/examples/*/*.ino", 
+    "authors": [
+        {
+            "maintainer": false, 
+            "name": "Zack Lalanne", 
+            "url": "https://github.com/zlalanne", 
+            "email": "zack.lalanne@gmail.com"
+        }
+    ], 
+    "keywords": [
+        "driver", 
+        "robot", 
+        "motor"
+    ], 
+    "id": 45, 
+    "description": "A port of Sparkfun's RedBot Mainboard to BoosterPack form to be used with TI LaunchPads + Energia"
+}

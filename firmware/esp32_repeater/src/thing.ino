@@ -5,7 +5,7 @@ BluetoothSerial SerialBT;
 
 // #define LED_PIN BUILTIN_LED
 #define LED_PIN 02
-#define GPIO_PIN 27
+#define GPIO_PIN 04
 
 boolean blinkFlag = false;
 
@@ -23,20 +23,17 @@ void loop() {
   char c2;
   char c3;
 
-  /* if (digitalRead(GPIO_PIN)) {
-    digitalWrite(LED_PIN, HIGH);
-  }
-  else {
-    digitalWrite(LED_PIN, LOW);
-  }
-  */
+  digitalWrite(LED_PIN, digitalRead(GPIO_PIN));
+
+  /* 
   delay(200);
   digitalWrite(LED_PIN, LOW);
 
   delay(200);
   digitalWrite(LED_PIN, HIGH);
+  */
 
-  // Serial (not Serial1) goes to teensy
+  // Serial prints
 
   while (Serial.available()) {
     c1 = Serial.read();
