@@ -3,20 +3,37 @@
 #include <SD.h>
 #include <SPI.h>
 #include <string.h>
-#include "tones.h"
-#include "SparkFun_Ublox_Arduino_Library.h" 
+#include <tones.h>
+#include <SparkFun_u-blox_GNSS_Arduino_Library.h> 
+#include <SparkFunLSM6DS3.h>
 
+// serial stuff
 #define compSerial Serial // data from computer keyboard to teensy USB
 #define MP2Serial Serial2 // data from MP2 to teensy
 #define BTSerial  Serial3 // data from ESP32 to teensy UART
 #define BAUDRATE 115200
-
 #define COMP 0
 #define BT   1
 #define MP2  2
+uint8_t cmdState = COMP;
 
-// GPS
-SFE_UBLOX_GPS myGPS;
+uint8_t serialBuf[1000];
+uint8_t chr;
+
+//#define DEBUG
+
+#ifdef DEBUG
+  #define DEBUG_PRINT(...) compSerial.print(__VA_ARGS__)
+  #define DEBUG_PRINTLN(...) compSerial.println(__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(...)
+  #define DEBUG_PRINTLN(...)
+#endif
+
+
+// GPS STUFF
+SFE_UBLOX_GNSS myGNSS;
+
 #define GPS_BLINK_PIN 23
 
 boolean  GPS_blinkOn = true;
@@ -27,8 +44,25 @@ uint32_t GPS_blinkInterval = 300;
 uint32_t GPS_blinkNow;
 
 uint32_t GPS_checkDelta = 0;
-uint32_t GPS_checkInterval = 100; 
+uint32_t GPS_checkInterval = 500; 
 uint32_t GPS_checkNow;
+
+unsigned long GPSlastTime = 0; //Simple local timer. Limits amount if I2C traffic to u-blox module.
+unsigned long GPSstartTime = 0; //Used to calc the actual update rate.
+unsigned long GPSupdateCount = 0; //Used to calc the actual update rate.
+
+long latitude;
+long longitude;
+uint16_t SIV;
+uint16_t day;
+uint16_t sec;
+boolean GPS_active;
+
+// IMU
+LSM6DS3 myIMU; 
+long IMU_x;
+long IMU_y;
+long IMU_z;
 
 // sound
 #define SPK_PIN 9
@@ -45,7 +79,7 @@ int noteDurations[] = { 125, 125, 64, 125, 125, 64 };
 #define FILES         'f' // show files
 #define MPU           'm'
 #define GPS           'p' // p, for planet!
-#define SAVE          's' 
+#define SD_CHECK      's' 
 #define HELP          'h' 
 
 // states
@@ -57,8 +91,9 @@ int noteDurations[] = { 125, 125, 64, 125, 125, 64 };
 #define SET_MPU            5
 #define CHECK_MPU          6
 #define CHECK_GPS          7
-#define BT_RECV_LINES      8
-#define SHOW_FILES         9
+#define CHECK_SD_CARD      8
+#define BT_RECV_LINES      9
+#define SHOW_FILES         10
 
 uint8_t state = IDLE;
 
@@ -91,38 +126,57 @@ uint32_t recordInterval = 100;
 uint32_t blinkNow;
 
 // SD card stuff
-char SD_card_name[25];
+char SD_file_name[25];
 File dataFile;
 const int chipSelect = BUILTIN_SDCARD;
+
+elapsedMillis loopTime;
 
 void setup() {
   compSerial.begin(BAUDRATE);
   BTSerial.begin(BAUDRATE);
   MP2Serial.begin(BAUDRATE);
 
+  // crank it up
+  MP2Serial.addMemoryForRead(serialBuf, sizeof(serialBuf));
+
   pinMode(EXT_BLINK_PIN, OUTPUT); 
   pinMode(GPS_BLINK_PIN, OUTPUT); 
 
   if (!SD.begin(chipSelect)) {
     compSerial.println("Card failed, or not present");
+    BTSerial.println("Card failed, or not present");
   }
-  compSerial.println("SD card initialized");
+  else {
+    compSerial.println("SD card initialized");
+    BTSerial.println("SD card initialized");
+  }
 
   Wire.begin();
+  Wire.setClock(400000);
 
-  if (myGPS.begin() == false)
-  {
-    Serial.println(F("Ublox GPS not detected at default I2C address. Please check wiring. Freezing."));
+  myIMU.begin();
+
+  if (myGNSS.begin() == false) {
+    compSerial.println(F("GPS not detected"));
     while (1);
   }
+
+  myGNSS.setI2COutput(COM_TYPE_UBX); 
+  myGNSS.setNavigationFrequency(5); 
+
 
   clrSerialString(COMP);
   clrSerialString(BT);
 }
 
 void loop() {
-  handleBlink();
-  handleGPS();
+  loopTime = 0;
+  if (state != RECORD_GET_RESULTS) {
+    handleBlink();
+    handleIMU();
+    GPSloop();
+  }
 
   if (recvSerialData(compSerial, COMP) != 0) {
     processCommand(COMP); 
@@ -131,23 +185,38 @@ void loop() {
   if (recvSerialData(BTSerial, BT) != 0) {
     processCommand(BT); 
   }
-
+  
   switch (state) {
   case CHECK_MPU:
     {
-      compSerial.print("pitch :: ");
-      compSerial.print(" :: roll :: ");
-      BTSerial.print("pitch :: ");
-      BTSerial.print(" :: roll :: ");
-      delay(100);
+      printCurrentSerial("Accelerometer: ");
+      printCurrentSerial(IMU_x);
+      printCurrentSerial(" :: ");
+      printCurrentSerial(IMU_y);
+      printCurrentSerial(" :: ");
+      printCurrentSerial(IMU_z);
+      printCurrentSerial("\n");
+      delay(100); // run, and block, user has to hit 'e'
     }
     break;
   case CHECK_GPS:
     {
+      if (GPS_active) {
+	printCurrentSerial("GPS: ");
+	printCurrentSerial(latitude);
+	printCurrentSerial(" :: ");
+	printCurrentSerial(longitude);
+	printCurrentSerial(" :: ");
+	printCurrentSerial(SIV);
+	printCurrentSerial("\n");
+      }
+      else {
+	printCurrentSerial("no satellites\n");
+      }
       state = IDLE;
     }
     break;
-  case BT_RECV_LINES: // basically gets output until timeout
+  case BT_RECV_LINES: // basically gets output until timeout, forgot why it's needed
     {
       uint8_t r = recvSerialData(MP2Serial, MP2);
       if (r == 1) {
@@ -163,25 +232,31 @@ void loop() {
     break;
   case INIT_RECORD:
     {
-      MP2Serial.write("status stop\r\n"); // send this just in case 
-      MP2Serial.write("get\r\n");
-      compSerial.println("INIT_RECORD :: ");
-      state = RECORD_GET_RESULTS;
-
       // remove and then write
-      if (SD.exists(SD_card_name)) { SD.remove(SD_card_name); }
-      dataFile = SD.open(SD_card_name, FILE_WRITE);
+      if (SD.exists(SD_file_name)) { SD.remove(SD_file_name); }
+      dataFile = SD.open(SD_file_name, FILE_WRITE);
+
       lineCount = 0;
       recordTime = millis();
       blinkFlag = true;
 
       if (!dataFile) {
-	compSerial.print("error opening: "); compSerial.print(dataFile);
-	BTSerial.print("error opening: "); BTSerial.print((char) dataFile);
+	printCurrentSerial("error opening: "); 
+	printCurrentSerial(SD_file_name);
+	printCurrentSerial("\n");
+	state = IDLE;
       }
       else {
-	compSerial.println("SD :: {\nSD :: \"blob\": \"");
+	// note, only sending to serial, not BT, for debugging
+	DEBUG_PRINTLN("SD :: {\nSD :: \"blob\": \"");
 	dataFile.println("{\n\"blob\": \"");
+
+	startTone(); // this is blocking! 
+
+	MP2Serial.write("status stop\r\n"); // send this just in case 
+	MP2Serial.write("get\r\n");
+	printCurrentSerial("INIT_RECORD\n");
+	state = RECORD_GET_RESULTS;
       }
     }
     break;
@@ -189,17 +264,16 @@ void loop() {
     {
       uint8_t r = recvSerialData(MP2Serial, MP2);
       if (r == 1) {
-	compSerial.print("SD :: ");
-	compSerial.println(receivedChars[MP2]);
+	// same story, only sending to serial, not BT, for debugging
+	DEBUG_PRINT("SD :: ");
+	DEBUG_PRINTLN(receivedChars[MP2]);
 	if (dataFile) { dataFile.println(receivedChars[MP2]); }  // SD write
 	clrSerialString(MP2);
       }
       if (r == 2) {
-	startTone(); // this is blocking! 
-	compSerial.println("TIMEOUT");
-
-	compSerial.println("SD :: \",");
-	compSerial.println("SD :: \"data\": [");
+	DEBUG_PRINTLN("TIMEOUT");
+	DEBUG_PRINTLN("SD :: \",");
+	DEBUG_PRINTLN("SD :: \"data\": [");
 	if (dataFile) {
 	  dataFile.println("\",");
 	  dataFile.println("\"data\": [");
@@ -228,19 +302,24 @@ void loop() {
 	}
 
 	if (strlen(receivedChars[MP2]) > 0) {
-	  // addFloatElementToJSON(receivedChars[MP2], "pitch", pitch);
-	  // the roll is useful for current mount of logger to bike
-	  // addFloatElementToJSON(receivedChars[MP2], "angle", roll);
-	  // addIntElementToJSON(receivedChars[MP2], "time", millis() - recordTime);
+	  addFloatElementToJSON(receivedChars[MP2], "IMU_x", IMU_x);
+	  addFloatElementToJSON(receivedChars[MP2], "IMU_y", IMU_y);
+	  addFloatElementToJSON(receivedChars[MP2], "IMU_z", IMU_z);
 
-	  // addFloatElementToJSON(receivedChars[MP2], "lat", latitude_mdeg / 1000000.);
-	  // addFloatElementToJSON(receivedChars[MP2], "long", longitude_mdeg / 1000000.);
+	  if (GPS_active) {
+	    addFloatElementToJSON(receivedChars[MP2], "lat", latitude/ 10000000.);
+	    addFloatElementToJSON(receivedChars[MP2], "long", longitude / 10000000.);
+	  }
+	  else {
+	    addFloatElementToJSON(receivedChars[MP2], "lat", 0.0);
+	    addFloatElementToJSON(receivedChars[MP2], "long", 0.0);
+	  }
 
 	  // write the old string
 	  strcpy(oldStr, receivedChars[MP2]);
-	  compSerial.print("SD :: ");
-	  compSerial.print(oldStr);
-	  compSerial.println(",");
+	  DEBUG_PRINT("SD :: ");
+	  DEBUG_PRINT(oldStr);
+	  DEBUG_PRINTLN(",");
 
 	  if (dataFile) { // SD write
 	    dataFile.print(oldStr);
@@ -255,25 +334,29 @@ void loop() {
 	  clrSerialString(BT);
 	  lineCount = 0;
 	}
+	compSerial.print("looptime :: ");
+	compSerial.println(loopTime);
       }
     }
     break;
   case STOP_RECORD:
     {
-      compSerial.println("process :: status stop");
       MP2Serial.write("status stop\r\n");
+      compSerial.println("process :: status stop");
 
       dataFile.print(oldStr);
       dataFile.println("\n]\n}");
-      compSerial.print("SD :: ");
-      compSerial.print(oldStr);
-      compSerial.println("\n]\nSD :: }");
+      DEBUG_PRINT("SD :: ");
+      DEBUG_PRINT(oldStr);
+      DEBUG_PRINTLN("\n]\nSD :: }");
 
 
-      compSerial.print("...STOP_RECORD");
-      BTSerial.println("...STOP_RECORD");
-      if (dataFile) { dataFile.close(); }
-      // dataFile.close();
+      printCurrentSerial("...stop record...");
+      if (dataFile) {
+	dataFile.close();
+	printCurrentSerial("...file closed");
+      }
+      printCurrentSerial("\n");
       stopTone(); // this is blocking! 
       blinkFlag = false;
       state = IDLE;
@@ -341,6 +424,15 @@ void clrSerialString(int serNum) {
   receivedChars[serNum][0] = '\0';
 }
 
+void printCurrentSerial (char * msg) {
+  if (cmdState == COMP) {
+    compSerial.print(msg);
+  }
+  if (cmdState == BT) {
+    BTSerial.print(msg);
+  }
+}
+
 void processCommand(int serNum) {
 
   char str2[maxReceiveLength];  // seriously, I write bad code
@@ -352,108 +444,89 @@ void processCommand(int serNum) {
   char commandString[maxReceiveLength]; 
   commandString[0] = '\0';
 
-  if (receivedChars[serNum][1] != ' ' && strlen(receivedChars[serNum]) > 2) {
-    compSerial.print("commands must start with single letter :: ");
-    compSerial.print(serNum);
-    compSerial.print(" :: ");
-    compSerial.print(receivedChars[serNum]);
-    compSerial.print(" :: ");
-    compSerial.println(strlen(receivedChars[serNum]));
+  cmdState = serNum; // used by printCurrentSerial to report results
 
+  if (receivedChars[serNum][1] != ' ' && strlen(receivedChars[serNum]) > 2) {
+    printCurrentSerial("command did not start with single letter\n");
     clrSerialString(serNum);
     return;
   }
 
   char cmd = receivedChars[serNum][0];
-  compSerial.print("CMD :: "); compSerial.println(cmd);
+  printCurrentSerial("CMD :: ");
+  printCurrentSerial(receivedChars[serNum]);
+  printCurrentSerial("\n");
 
   if (strlen(receivedChars[serNum]) > 2) {
     strncpy(commandString, receivedChars[serNum] + 2, strlen(receivedChars[serNum]));
-    compSerial.print("STR :: ");
-    compSerial.println(commandString);
+    printCurrentSerial("STR :: ");
+    printCurrentSerial(commandString);
+    printCurrentSerial("\n");
   }
   
   switch (cmd) {
   case BLINK:
-    compSerial.println("process :: BLINK!");
-    BTSerial.println("...blink");
-    // BTSerial.println("...blink");
+    printCurrentSerial("process :: blink\n");
     blinkFlag = !blinkFlag;
     state = IDLE;
     break;
   case TONE:
-    compSerial.println("process :: tone");
-    BTSerial.println("...tone");
+    printCurrentSerial("process :: tone\n");
     startTone();
     state = IDLE;
     break;
   case RECORD:
-    compSerial.println("process:: RECORD!");
-    BTSerial.println("process:: RECORD!");
-    SD_card_name[0] = '\0';
+    printCurrentSerial("process :: record\n");
+    SD_file_name[0] = '\0';
     if (strlen(commandString) > 0 && strlen(commandString) < 20) {
-      strcpy(SD_card_name, commandString);
-      strcat(SD_card_name, ".txt");
-      compSerial.print("name :: ");
-      compSerial.println(SD_card_name);
-      BTSerial.print("name :: ");
-      BTSerial.println(SD_card_name);
+      strcpy(SD_file_name, commandString);
+      strcat(SD_file_name, ".txt");
     }
     else {
-      strcpy(SD_card_name, "default.txt");
-      compSerial.print("name :: ");
-      compSerial.println(SD_card_name);
-      BTSerial.print("name :: ");
-      BTSerial.println(SD_card_name);
+      strcpy(SD_file_name, "default.txt");
     }
-    BTSerial.println("....");
+    printCurrentSerial("name :: ");
+    printCurrentSerial(SD_file_name);
+    printCurrentSerial("\n");
     state = INIT_RECORD;
     break;
   case GET:
-    compSerial.println("process :: get");
+    printCurrentSerial("process :: get\n");
     MP2Serial.write("get\r\n");
     state = BT_RECV_LINES;
     break;
   case FILES:
-    compSerial.println("process :: showfiles");
+    printCurrentSerial("process :: showfiles\n");
     state = SHOW_FILES;
     break;
-  case SAVE:
-    compSerial.println("process :: save");
-    MP2Serial.write("save\r\n");
-    state = BT_RECV_LINES;
+  case SD_CHECK:
+    printCurrentSerial("process :: check SD card\n");
+    state = CHECK_SD_CARD;
     break;
   case MPU:
-    compSerial.println("process :: showing MPU");
+    printCurrentSerial("process :: showing MPU\n");
     state = CHECK_MPU;
-    compSerial.println("Level the bike");
-    BTSerial.println("Level the bike");
     delay(400);
     break;
   case GPS:
-    compSerial.println("process :: showing GPS");
+    printCurrentSerial("process :: showing GPS\n");
     state = CHECK_GPS;
-    compSerial.println("reading the GPS");
-    BTSerial.println("reading the GPS");
-    delay(400);
     break;
   case COMMAND:
     if (strlen(commandString) > 0) {
-      compSerial.println("sending:");
-      BTSerial.println("sending a command");
-      compSerial.println(commandString);
+      printCurrentSerial("sending:");
+      printCurrentSerial(commandString);
+      printCurrentSerial("\n");
       MP2Serial.write(commandString);
       MP2Serial.write("\r\n");
       state = BT_RECV_LINES;
     }
     else {
-      compSerial.println("Please send command");
-      BTSerial.println("Please send command");
+      printCurrentSerial("Please send command\n");
       state = IDLE;
     }
     break;
   case END:
-    compSerial.println(state);
     if (state == RECORD_JSON || state == RECORD_GET_RESULTS) {
       state = STOP_RECORD;
     }
@@ -462,25 +535,15 @@ void processCommand(int serNum) {
     }
     break;
   case HELP:
-    compSerial.println("BLINK         b: blink LED on logger");
-    compSerial.println("TONE          t: emit tone on logger");
-    compSerial.println("RECORD        r: start recording");
-    compSerial.println("END           e: stop recording ");
-    compSerial.println("GET           g: send get to MP2");
-    compSerial.println("COMMAND       c: send command to MP2 \"c status json\"");
-    compSerial.println("SAVE          s: send save to MP2");
-    compSerial.println("FILES         f: broken: see files on SD card");
-    compSerial.println("HELP          h: this help message");
-
-    BTSerial.println("BLINK         b: blink LED on logger");
-    BTSerial.println("TONE          t: emit tone on logger");
-    BTSerial.println("RECORD        r: start recording");
-    BTSerial.println("END           e: stop recording ");
-    BTSerial.println("GET           g: send get to MP2");
-    BTSerial.println("COMMAND       c: send command to MP2 \"c status json\"");
-    BTSerial.println("SAVE          s: send save to MP2");
-    BTSerial.println("FILES         f: broken: see files on SD card");
-    BTSerial.println("HELP          h: this help message");
+    printCurrentSerial("BLINK         b: blink LED on logger\n");
+    printCurrentSerial("TONE          t: emit tone on logger\n");
+    printCurrentSerial("RECORD        r: start recording\n");
+    printCurrentSerial("END           e: stop recording \n");
+    printCurrentSerial("GET           g: send get to MP2\n");
+    printCurrentSerial("COMMAND       c: send command to MP2 \"status json\"");
+    printCurrentSerial("SAVE          s: send save to MP2\n");
+    printCurrentSerial("FILES         f: broken: see files on SD card\n");
+    printCurrentSerial("HELP          h: this help message\n");
     state = IDLE;
     break;
   case IDLE:
@@ -554,7 +617,12 @@ void addFloatElementToJSON(char *jsonstr, char *key, float value) {
   jsonstr[len - 1] = '\0'; 
   char buffer[40];
 
-  sprintf(buffer, ",\"%s\":%.6f}", key, value);  
+  if(value > -0.00000001 && value < 0.00000001) {
+    sprintf(buffer, ",\"%s\":0.0}", key);  
+  }
+  else {
+    sprintf(buffer, ",\"%s\":%.4f}", key, value);  
+  }
 
   strcat(jsonstr, buffer);
 }
@@ -606,46 +674,34 @@ void handleBlink() {
   }
 }
 
-void handleGPS() {
-  GPS_checkNow = millis();
-  if ((GPS_checkNow - GPS_checkDelta) < GPS_checkInterval) {
-    return;
+void handleIMU() {
+  IMU_x = myIMU.readFloatAccelX() * 90.0;
+  IMU_y = myIMU.readFloatAccelY() * 90.0;
+  IMU_z = myIMU.readFloatAccelZ() * 90.0;
+}
+
+void GPSloop() {
+  //Query module every 25 ms. Doing it more often will just cause I2C traffic.
+  //The module only responds when a new position is available. This is defined
+  //by the update freq.
+
+  GPS_active = false;
+  if (millis() - GPSlastTime > 200)
+  {
+    GPSlastTime = millis(); //Update the timer
+    
+    latitude = myGNSS.getLatitude();
+    longitude = myGNSS.getLongitude();
+    // latitude /= 10000000.0;
+    // longitude /= 10000000.0;
+    GPS_active = true;
+
+    GPSupdateCount++;
+
+    //Calculate the actual update rate based on the sketch start time and the 
+    //number of updates we've received.
+    // Serial.print(F(" Rate: "));
+    // Serial.print( GPSupdateCount / ((millis() - GPSstartTime) / 1000.0), 2);
+    // Serial.println(F("Hz"));
   }
-  GPS_checkDelta = GPS_checkNow;
-
-  long latitude = myGPS.getLatitude();
-  // Serial.print(F("Lat: "));
-  // Serial.print(latitude / 10000000., 6);
-
-  long longitude = myGPS.getLongitude();
-  // Serial.print(F(" Long: "));
-  // Serial.print(longitude / 10000000., 6);
-
-  int SIV = myGPS.getSIV();
-  // Serial.print(F(" SIV: "));
-  // Serial.print(SIV);
-
-  int day = myGPS.getDay();
-  // Serial.print(F(" day: "));
-  // Serial.print(day);
-
-  int sec = myGPS.getSecond();
-  // Serial.print(F(" second: "));
-  // Serial.print(sec);
-
-  if (SIV == 0) {
-    GPS_blinkFlag = false; // just stays on until a satellite locks
-  }
-  else {
-    GPS_blinkFlag = true; 
-  }
-  GPS_blinkFactor = 5;
-  if (SIV < 5) {
-    GPS_blinkFactor = SIV;
-  }
-
-  // Serial.print(F(" BF: "));
-  // Serial.print(GPS_blinkFactor);
-
-  Serial.println();
 }

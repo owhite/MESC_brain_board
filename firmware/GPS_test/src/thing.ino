@@ -1,113 +1,88 @@
-#include <SD.h>
-#include <SPI.h>
-#Include <Wire.h> //Needed for I2C to GPS
-#include "SparkFun_Ublox_Arduino_Library.h" 
+/*
+  Set update rate to 10Hz
+  By: Nathan Seidle
+  SparkFun Electronics
+  Date: January 3rd, 2019
+  License: MIT. See license file for more information but you can
+  basically do whatever you want with this code.
 
-SFE_UBLOX_GPS myGPS;
+  This example shows how to increase the output of the module from 1Hz to 4Hz.
+  The max output rate various from model to model. RTFM! But you cannot do harm
+  to the module.
 
-long lastTime = 0; 
+  We also disable NMEA output on the I2C bus and use only UBX. This dramatically 
+  decreases the amount of data that needs to be transmitted.
 
-// SD card stuff
-char SD_card_name[25];
-File dataFile;
-const int chipSelect = BUILTIN_SDCARD;
+  Leave NMEA parsing behind. Now you can simply ask the module for the datums you want!
 
-// GPS blink
-#define GPS_BLINK_PIN 23
+  Feel like supporting open source hardware?
+  Buy a board from SparkFun!
+  ZED-F9P RTK2: https://www.sparkfun.com/products/15136
+  NEO-M8P RTK: https://www.sparkfun.com/products/15005
+  SAM-M8Q: https://www.sparkfun.com/products/15106
 
-boolean  GPS_blinkOn = true;
-boolean  GPS_blinkFlag = true;
-uint32_t GPS_blinkFactor = 1;
-uint32_t GPS_blinkDelta = 0;
-uint32_t GPS_blinkInterval = 300; 
-uint32_t GPS_blinkNow;
+  Hardware Connections:
+  Plug a Qwiic cable into the GNSS and a BlackBoard
+  If you don't have a platform with a Qwiic connection use the SparkFun Qwiic Breadboard Jumper (https://www.sparkfun.com/products/14425)
+  Open the serial monitor at 115200 baud to see the output
+*/
 
-uint32_t GPS_checkDelta = 0;
-uint32_t GPS_checkInterval = 100; 
-uint32_t GPS_checkNow;
+#include <Wire.h> //Needed for I2C to GNSS
 
-void setup() {
+#include <SparkFun_u-blox_GNSS_Arduino_Library.h> //http://librarymanager/All#SparkFun_u-blox_GNSS
+SFE_UBLOX_GNSS myGNSS;
+
+unsigned long GPSlastTime = 0; //Simple local timer. Limits amount if I2C traffic to u-blox module.
+unsigned long GPSstartTime = 0; //Used to calc the actual update rate.
+unsigned long GPSupdateCount = 0; //Used to calc the actual update rate.
+
+void setup()
+{
   Serial.begin(115200);
-  Serial.println("Ublox Example");
 
-  if (!SD.begin(chipSelect)) {
-    Serial.println("Card failed, or not present");
-  }
-  Serial.println("SD card initialized");
+  Serial.println("SparkFun u-blox Example");
 
   Wire.begin();
 
-  if (myGPS.begin() == false) {
-    Serial.println(F("Ublox GPS not detected at default I2C address. Please check wiring. Freezing."));
+  // Increase I2C clock speed to 400kHz to cope with the high navigation rate
+  // (We normally recommend running the bus at 100kHz)
+  Wire.setClock(400000);
+  
+  if (myGNSS.begin() == false) //Connect to the u-blox module using Wire port
+  {
+    Serial.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing."));
     while (1);
   }
 
-  myGPS.setNavigationFrequency(20); 
-  myGPS.setI2COutput(COM_TYPE_UBX); 
-  myGPS.saveConfiguration(); 
+  myGNSS.setI2COutput(COM_TYPE_UBX); //Set the I2C port to output UBX only (turn off NMEA noise)
+  myGNSS.setNavigationFrequency(5); //Set output to 5 times a second
+
+  uint8_t rate = myGNSS.getNavigationFrequency(); //Get the update rate of this module
+  Serial.print("Current update rate: ");
+  Serial.println(rate);
+
+  GPSstartTime = millis();
 }
 
 void loop() {
-  GPS_blinkFactor = 2;
-  handleBlink();
-  handleGPS();
-}
+  //Query module every 25 ms. Doing it more often will just cause I2C traffic.
+  //The module only responds when a new position is available. This is defined
+  //by the update freq.
+  if (millis() - GPSlastTime > 25)
+  {
+    GPSlastTime = millis(); //Update the timer
+    
+    long latitude = myGNSS.getLatitude();
+    long longitude = myGNSS.getLongitude();
 
-void handleBlink() {
-  GPS_blinkNow = millis();
+    GPSupdateCount++;
 
-  if (GPS_blinkFlag) {
-    if ((GPS_blinkNow - GPS_blinkDelta) > GPS_blinkInterval / GPS_blinkFactor) {
-      digitalWrite(GPS_BLINK_PIN, GPS_blinkOn);
-      GPS_blinkOn = !GPS_blinkOn;
-      GPS_blinkDelta = GPS_blinkNow;
-    }
+    //Calculate the actual update rate based on the sketch start time and the 
+    //number of updates we've received.
+    Serial.print(F(" Rate: "));
+    Serial.print( GPSupdateCount / ((millis() - GPSstartTime) / 1000.0), 2);
+    Serial.print(F("Hz"));
+
+    Serial.println();
   }
-  else {
-    digitalWrite(GPS_BLINK_PIN, HIGH);
-  }
-}
-
-void handleGPS() {
-  GPS_checkNow = millis();
-  if ((GPS_checkNow - GPS_checkDelta) < GPS_checkInterval) {
-    return;
-  }
-  GPS_checkDelta = GPS_checkNow;
-
-  long latitude = myGPS.getLatitude();
-  Serial.print(F("Lat: "));
-  Serial.print(latitude / 10000000., 6);
-
-  long longitude = myGPS.getLongitude();
-  Serial.print(F(" Long: "));
-  Serial.print(longitude / 10000000., 6);
-
-  int SIV = myGPS.getSIV();
-  Serial.print(F(" SIV: "));
-  Serial.print(SIV);
-
-  int day = myGPS.getDay();
-  Serial.print(F(" day: "));
-  Serial.print(day);
-
-  int sec = myGPS.getSecond();
-  Serial.print(F(" second: "));
-  Serial.print(sec);
-
-  if (SIV == 0) {
-    GPS_blinkFlag = false; // just stays on until a satellite locks
-  }
-  else {
-    GPS_blinkFlag = true; 
-  }
-  GPS_blinkFactor = 5;
-  if (SIV < 5) {
-    GPS_blinkFactor = SIV;
-  }
-
-  Serial.print(F(" BF: "));
-  Serial.print(GPS_blinkFactor);
-
-  Serial.println();
 }
