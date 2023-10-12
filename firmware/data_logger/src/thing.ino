@@ -256,6 +256,7 @@ void loop() {
 	MP2Serial.write("status stop\r\n"); // send this just in case 
 	MP2Serial.write("get\r\n");
 	printCurrentSerial("INIT_RECORD\n");
+	clrSerialString(MP2);
 	state = RECORD_GET_RESULTS;
       }
     }
@@ -480,10 +481,10 @@ void processCommand(int serNum) {
     SD_file_name[0] = '\0';
     if (strlen(commandString) > 0 && strlen(commandString) < 20) {
       strcpy(SD_file_name, commandString);
-      strcat(SD_file_name, ".txt");
+      strcat(SD_file_name, ".json");
     }
     else {
-      strcpy(SD_file_name, "default.txt");
+      strcpy(SD_file_name, "default.json");
     }
     printCurrentSerial("name :: ");
     printCurrentSerial(SD_file_name);
