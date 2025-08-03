@@ -1,0 +1,38 @@
+EESchema-LIBRARY Version 2.3
+#encoding utf-8
+#(c) SnapEDA 2016 (snapeda.com)
+#This work is licensed under a Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA) with Design Exception 1.0
+#
+# CDS-13138-SMT-TR
+#
+DEF CDS-13138-SMT-TR LS 0 40 N N 1 L N
+F0 "LS" -151 351 50 H V L BNN
+F1 "CDS-13138-SMT-TR" -151 -453 50 H V L BNN
+F2 "SPKR_CDS-13138-SMT-TR" 0 0 50 H I L BNN
+F3 "" 0 0 50 H I L BNN
+F4 "CDS Series 8 Ohm Magnetic Speaker 300 mW 100 Hz Surface Mount" 0 0 50 H I L BNN "DESCRIPTION"
+F5 "CUI" 0 0 50 H I L BNN "MF"
+F6 "Good" 0 0 50 H I L BNN "AVAILABILITY"
+F7 "CUI" 0 0 50 H I L BNN "PACKAGE"
+F8 "CDS-13138-SMT-TR" 0 0 50 H I L BNN "MP"
+F9 "4.76 USD" 0 0 50 H I L BNN "PRICE"
+DRAW
+P 2 0 0 10 -25 50 0 50 N
+P 2 0 0 10 0 50 25 50 N
+P 2 0 0 10 25 50 25 -50 N
+P 2 0 0 10 25 -50 0 -50 N
+P 2 0 0 10 0 -50 -25 -50 N
+P 2 0 0 10 -25 -50 -25 0 N
+P 2 0 0 10 -25 0 -25 50 N
+P 2 0 0 10 25 50 75 125 N
+P 2 0 0 10 75 125 75 -125 N
+P 2 0 0 10 75 -125 25 -50 N
+P 2 0 0 10 0 50 0 100 N
+P 2 0 0 10 0 -50 0 -100 N
+T 0 -75 50 70 0 0 0 + Normal 0 L B
+X ~ P 0 200 100 D 40 40 0 0 P 
+X ~ M 0 -200 100 U 40 40 0 0 P 
+ENDDRAW
+ENDDEF
+#
+# End Library
