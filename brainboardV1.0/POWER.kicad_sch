@@ -2379,6 +2379,17 @@
 		)
 		(uuid "e21c697e-4b14-4c16-99c7-e6c709d21b89")
 	)
+	(text "Voltage divider\nNot implemented"
+		(exclude_from_sim no)
+		(at 78.486 99.06 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "8bee5c63-3a74-44da-a734-0405bb479ea5")
+	)
 	(global_label "Vcc"
 		(shape input)
 		(at 154.94 113.03 180)

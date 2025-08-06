@@ -3985,23 +3985,19 @@
 		(uuid "d639fb16-4339-41fe-bc0d-5c597da85c86")
 	)
 	(no_connect
-		(at 163.83 127)
+		(at 163.83 123.19)
 		(uuid "07817a88-3007-4e30-a328-29c8e607bbf9")
 	)
 	(no_connect
-		(at 163.83 99.06)
+		(at 163.83 95.25)
 		(uuid "0a832d6b-6745-42da-9b2e-b82f0a862166")
 	)
 	(no_connect
-		(at 163.83 101.6)
+		(at 163.83 97.79)
 		(uuid "12593060-67f5-4f3e-90eb-5e1e7d2f49aa")
 	)
 	(no_connect
-		(at 96.52 140.97)
-		(uuid "12dfaad5-d1f0-4de0-bce2-d2c710ab7646")
-	)
-	(no_connect
-		(at 163.83 106.68)
+		(at 163.83 102.87)
 		(uuid "15404ad8-dd15-4f13-b217-83b8b271a441")
 	)
 	(no_connect
@@ -4009,19 +4005,19 @@
 		(uuid "1e48684e-07ab-47b4-823c-0988b4f647a2")
 	)
 	(no_connect
-		(at 163.83 104.14)
+		(at 163.83 134.62)
+		(uuid "1e9f1f02-a4bb-42ff-9326-e792232544b4")
+	)
+	(no_connect
+		(at 163.83 100.33)
 		(uuid "22f99e5d-a448-4dc2-a72a-d4847825137c")
 	)
 	(no_connect
-		(at 96.52 121.92)
-		(uuid "3c1b1a08-49a9-41ac-bfe4-c1f43aa275b9")
-	)
-	(no_connect
-		(at 163.83 96.52)
+		(at 163.83 92.71)
 		(uuid "44c9c020-1cae-4e64-bc1f-e7e5002d2bfa")
 	)
 	(no_connect
-		(at 163.83 116.84)
+		(at 163.83 113.03)
 		(uuid "4879172c-de92-4592-af66-36784ff13ebd")
 	)
 	(no_connect
@@ -4029,7 +4025,7 @@
 		(uuid "4a972e2c-f50c-4769-9d1f-9eb6b87c3eb4")
 	)
 	(no_connect
-		(at 163.83 119.38)
+		(at 163.83 115.57)
 		(uuid "679e9635-a93f-41f3-88d3-066bf84e8457")
 	)
 	(no_connect
@@ -4037,11 +4033,15 @@
 		(uuid "7151ca43-a9d4-452d-84d4-83e46a556715")
 	)
 	(no_connect
+		(at 163.83 132.08)
+		(uuid "71731fb9-6544-4b13-bf04-897fc0354d9d")
+	)
+	(no_connect
 		(at 170.18 57.15)
 		(uuid "762945e6-8048-46d1-8076-059a007c9601")
 	)
 	(no_connect
-		(at 163.83 114.3)
+		(at 163.83 110.49)
 		(uuid "856f4c63-d333-4c85-bc1d-a9be8fb3f0fa")
 	)
 	(no_connect
@@ -4049,7 +4049,7 @@
 		(uuid "9f2be0b7-eee7-4823-82ba-def1df164148")
 	)
 	(no_connect
-		(at 163.83 121.92)
+		(at 163.83 118.11)
 		(uuid "c874f501-4231-407c-b8df-ae1db0307a76")
 	)
 	(no_connect
@@ -4057,15 +4057,15 @@
 		(uuid "d3de9dc7-e894-4897-86b9-0399972a57eb")
 	)
 	(no_connect
-		(at 163.83 111.76)
+		(at 163.83 107.95)
 		(uuid "f3addbe1-97fc-4630-a2bd-3cf1819637d4")
 	)
 	(no_connect
-		(at 163.83 143.51)
+		(at 163.83 139.7)
 		(uuid "f3bae117-90c7-42c7-8125-484bb6b086ae")
 	)
 	(no_connect
-		(at 163.83 140.97)
+		(at 163.83 137.16)
 		(uuid "fd043d8b-5764-4a68-b95c-85e8d6f771ba")
 	)
 	(wire
@@ -4760,7 +4760,7 @@
 	)
 	(text "Teensy 4.0/4.1\nESP32\nUART\nRC receiver connector (for PWM/PPM/SBUS input)\nOptional UART debug header\nOptional I²C header (for sensors like INA219 or IMU)\nPower input connector\nVoltage divider (to monitor battery voltage)\nPush-button E-stop connector\nPower button (for system on/off)\nIMU connector (e.g., MPU-6050 or BNO085)\nencoder inputs (if reading position directly)\nbuzzer (for system alerts or E-stop signal)\nSWD debug access for Teensy\n"
 		(exclude_from_sim no)
-		(at 165.1 113.538 0)
+		(at 165.1 109.728 0)
 		(effects
 			(font
 				(face "Courier")
@@ -4783,7 +4783,7 @@
 	)
 	(text "MESC I/O\nReserved 2 GPIO pins on Teensy for emergency shutoff to MESC\nCAN connector (for MESC motor control)\nVoltage divider (to monitor battery voltage)\n\n"
 		(exclude_from_sim no)
-		(at 165.1 141.224 0)
+		(at 165.1 137.414 0)
 		(effects
 			(font
 				(face "Courier")
@@ -4793,8 +4793,19 @@
 		)
 		(uuid "3a8d2f55-1443-4969-9540-bca7f1e63a0c")
 	)
+	(text "Not great design w/ DC-DC conversion from high voltage VBat "
+		(exclude_from_sim no)
+		(at 184.404 144.526 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "9e7ec652-4109-4201-b935-b52ff7641d92")
+	)
 	(label "LED2"
 		(at 147.32 97.79 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4805,6 +4816,7 @@
 	)
 	(label "ESP_RX"
 		(at 154.94 21.59 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4815,6 +4827,7 @@
 	)
 	(label "CAN_RX"
 		(at 238.76 85.09 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4825,6 +4838,7 @@
 	)
 	(label "GND"
 		(at 238.76 80.01 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4835,6 +4849,7 @@
 	)
 	(label "VSENSE"
 		(at 154.94 87.63 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4845,6 +4860,7 @@
 	)
 	(label "MPU6050_XCL"
 		(at 130.81 121.92 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4855,6 +4871,7 @@
 	)
 	(label "ESP_RX"
 		(at 147.32 83.82 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4865,6 +4882,7 @@
 	)
 	(label "PB4_2"
 		(at 154.94 72.39 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4875,6 +4893,7 @@
 	)
 	(label "PB5_1"
 		(at 154.94 52.07 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4885,6 +4904,7 @@
 	)
 	(label "MPU6050_SCL"
 		(at 130.81 114.3 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4895,6 +4915,7 @@
 	)
 	(label "CAN_TX"
 		(at 238.76 87.63 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4905,6 +4926,7 @@
 	)
 	(label "MPU6050_AD0"
 		(at 130.81 124.46 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4915,6 +4937,7 @@
 	)
 	(label "PB3_2"
 		(at 154.94 69.85 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4925,6 +4948,7 @@
 	)
 	(label "GND"
 		(at 154.94 19.05 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4935,6 +4959,7 @@
 	)
 	(label "PB3_1"
 		(at 154.94 46.99 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4945,6 +4970,7 @@
 	)
 	(label "RC_Steering"
 		(at 154.94 44.45 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4955,6 +4981,7 @@
 	)
 	(label "GND"
 		(at 154.94 59.69 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4965,6 +4992,7 @@
 	)
 	(label "SPEAKER"
 		(at 154.94 67.31 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4975,6 +5003,7 @@
 	)
 	(label "ESP_TX"
 		(at 154.94 24.13 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4985,6 +5014,7 @@
 	)
 	(label "MPU6050_SCL"
 		(at 154.94 82.55 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4995,6 +5025,7 @@
 	)
 	(label "MPU6050_INT"
 		(at 130.81 127 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5005,6 +5036,7 @@
 	)
 	(label "MPU6050_SDA"
 		(at 130.81 116.84 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5015,6 +5047,7 @@
 	)
 	(label "CAN_RX"
 		(at 26.67 63.5 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5025,6 +5058,7 @@
 	)
 	(label "GND"
 		(at 130.81 111.76 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5035,6 +5069,7 @@
 	)
 	(label "LED2"
 		(at 154.94 29.21 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5045,6 +5080,7 @@
 	)
 	(label "VSENSE"
 		(at 149.86 100.965 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5055,6 +5091,7 @@
 	)
 	(label "+5V"
 		(at 238.76 77.47 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5065,6 +5102,7 @@
 	)
 	(label "RC_Mode"
 		(at 154.94 39.37 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5075,6 +5113,7 @@
 	)
 	(label "BUTTON"
 		(at 154.94 77.47 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5085,6 +5124,7 @@
 	)
 	(label "RC_Throttle"
 		(at 154.94 41.91 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5095,6 +5135,7 @@
 	)
 	(label "PB4_1"
 		(at 154.94 49.53 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5105,6 +5146,7 @@
 	)
 	(label "LED1"
 		(at 147.32 95.25 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5115,6 +5157,7 @@
 	)
 	(label "MPU6050_SDA"
 		(at 154.94 80.01 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5125,6 +5168,7 @@
 	)
 	(label "CAN_TX"
 		(at 26.67 60.96 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5135,6 +5179,7 @@
 	)
 	(label "LED1"
 		(at 154.94 26.67 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5145,6 +5190,7 @@
 	)
 	(label "PB5_2"
 		(at 154.94 74.93 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5155,6 +5201,7 @@
 	)
 	(label "+3.3V"
 		(at 130.81 109.22 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5165,6 +5212,7 @@
 	)
 	(label "ESP_TX"
 		(at 147.32 86.36 180)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5175,6 +5223,7 @@
 	)
 	(label "MPU6050_XDA"
 		(at 130.81 119.38 0)
+		(fields_autoplaced yes)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5311,6 +5360,28 @@
 			)
 		)
 	)
+	(global_label "GND"
+		(shape input)
+		(at 96.52 143.51 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "1017e838-0ed0-4092-b9c4-dd929bdfb5c5")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 103.3757 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "PB3_1"
 		(shape input)
 		(at 96.52 134.62 0)
@@ -5371,6 +5442,28 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GND"
+		(shape input)
+		(at 96.52 124.46 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "23002d5f-a84c-42c6-8d05-e10639b2d071")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 103.3757 124.46 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
@@ -5459,6 +5552,28 @@
 			)
 		)
 	)
+	(global_label "+5V"
+		(shape input)
+		(at 96.52 121.92 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "31b01f14-ad64-4465-8574-3160fad222e1")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 103.3757 121.92 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "RC_Y"
 		(shape input)
 		(at 66.04 146.05 180)
@@ -5536,6 +5651,28 @@
 		(uuid "42fc1c69-44c2-4c08-84aa-d0b7e8b3a1ae")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 48.0321 48.26 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "+5V"
+		(shape input)
+		(at 96.52 140.97 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "439d8231-6661-49fe-8965-3d91f270a575")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 103.3757 140.97 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6150,72 +6287,6 @@
 				)
 				(justify right)
 				(hide yes)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 96.52 143.51 90)
-		(mirror x)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "0758a302-2868-4eb9-bdff-28150494efee")
-		(property "Reference" "#PWR031"
-			(at 102.87 143.51 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "GND"
-			(at 101.6 143.51 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 96.52 143.51 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 96.52 143.51 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 96.52 143.51 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "f3302ec2-f1d5-484a-91ef-01aa1858fa04")
-		)
-		(instances
-			(project "MESC_brain_board"
-				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a"
-					(reference "#PWR031")
-					(unit 1)
-				)
 			)
 		)
 	)
@@ -6889,72 +6960,6 @@
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a"
 					(reference "#PWR026")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 96.52 124.46 90)
-		(mirror x)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "416a0036-04d9-4c98-9f2f-1cba6a14ef2c")
-		(property "Reference" "#PWR032"
-			(at 102.87 124.46 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "GND"
-			(at 101.6 124.46 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 96.52 124.46 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 96.52 124.46 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 96.52 124.46 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "0bee8eab-7c50-465d-9df2-8a571e396812")
-		)
-		(instances
-			(project "MESC_brain_board"
-				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a"
-					(reference "#PWR032")
 					(unit 1)
 				)
 			)
