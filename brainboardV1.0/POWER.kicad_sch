@@ -2443,7 +2443,7 @@
 	)
 	(global_label "+3.3V"
 		(shape input)
-		(at 130.81 93.98 180)
+		(at 154.94 106.68 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2452,7 +2452,7 @@
 		)
 		(uuid "4470dfe3-0435-43ee-9991-fe9564a8e68a")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 130.81 93.98 0)
+			(at 154.94 106.68 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4062,7 +4062,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x01")
-		(at 135.89 93.98 0)
+		(at 160.02 106.68 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -4071,7 +4071,7 @@
 		(fields_autoplaced yes)
 		(uuid "d6b9f6fe-7373-43d0-b473-a50d67536bf0")
 		(property "Reference" "J22"
-			(at 138.43 93.9799 0)
+			(at 162.56 106.6799 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4080,7 +4080,7 @@
 			)
 		)
 		(property "Value" "Conn_01x01"
-			(at 138.43 95.2499 0)
+			(at 162.56 107.9499 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4090,7 +4090,7 @@
 			)
 		)
 		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x01_P2.54mm_Vertical"
-			(at 135.89 93.98 0)
+			(at 160.02 106.68 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4099,7 +4099,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 135.89 93.98 0)
+			(at 160.02 106.68 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4108,7 +4108,7 @@
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x01, script generated (kicad-library-utils/schlib/autogen/connector/)"
-			(at 135.89 93.98 0)
+			(at 160.02 106.68 0)
 			(effects
 				(font
 					(size 1.27 1.27)
