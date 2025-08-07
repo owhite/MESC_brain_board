@@ -2,7 +2,7 @@
 
 [Chatgpt discussion](https://chatgpt.com/c/68653d84-b634-8011-b055-3476bfa95f52)
 
-## Teensy 4.x (Brain Board)
+## Teensy 4.0
 * 600+ MHz ARM Cortex-M7 — plenty of headroom for filtering, control loops, gait logic, telemetry
 * Tons of I/O for IMU, encoders, RC input, WiFi (via ESP add-on), etc.
 * Precise timing with elapsedMicros or interrupts for deterministic control
@@ -57,3 +57,9 @@
 * See github tag [pcb-v1](https://github.com/owhite/MESC_brain_board/releases/tag/pcb-v1) for V1.0
 * Retreive with this command: "git checkout pcb-v1"
 
+## NOTES
+
+ever wanted to change all the names of kicad files at once? use this:
+```
+python3 replace_kicad_names.py VESC_brain_board MESC_brain_board
+```
