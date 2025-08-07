@@ -5,7 +5,7 @@
 Gonna try to use my open source motor controller, the [MP2-DFN](https://github.com/owhite/MP2-DFN), and this circuit for a [brain board](https://github.com/owhite/MESC_brain_board/blob/main/brainboardV1.0/MESC_brain_board.pdf), a teensy 4.0, and an ESP-32, in combination with [MESC firmware](https://github.com/davidmolony/MESC_Firmware).
 
 ## First a shout out to friends:
-* An open source motor controller from badgineer: [MP2] (https://github.com/badgineer/MP2-ESC). 
+* [MP2](https://github.com/badgineer/MP2-ESC), an open source motor controller from badgineer. 
 * [MESC firmware](https://github.com/davidmolony/MESC_Firmware). 
 * PCB and PCBA sites: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
 
@@ -44,3 +44,68 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 * Measures rotor position for the BLDC
 * Output via SPI, PWM, or ABI 
 * Provides absolute angle, ideal for FOC and position tracking
+
+Suppose you bought a MT6701 board and you wanted to figure the mode it is set in. Use this:
+```
+#include <Wire.h>
+
+#define MT6701_ADDR 0x06  // Replace with your MT6701 I2C address
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Wire.setClock(400000);
+
+  delay(100);
+
+}
+
+void loop() {
+
+  delay(1000);
+
+  int modeByte = readRegister(0x38);
+  if (modeByte < 0) {
+    Serial.println("Failed to read register 0x38.");
+    return;
+  }
+
+  int outMode = modeByte & 0b11;       // Bits 1:0
+  int uvwRes  = (modeByte >> 4) & 0b111; // Bits 6:4
+
+  Serial.print("OUT_MODE bits: ");
+  Serial.println(outMode, BIN);
+
+  switch (outMode) {
+    case 0b00:
+      Serial.println("🟢 MT6701 is in ABZ mode (quadrature encoder output).");
+      break;
+    case 0b01:
+      Serial.println("🟡 MT6701 is in PWM or Analog output mode.");
+      break;
+    case 0b10:
+      Serial.print("🔵 MT6701 is in UVW (commutation) mode. Pole pairs setting: ");
+      Serial.println(uvwRes + 1);
+      break;
+    case 0b11:
+      Serial.println("🔴 Invalid or reserved OUT_MODE value (0b11).");
+      break;
+  }
+}
+
+
+int readRegister(uint8_t reg) {
+  Wire.beginTransmission(MT6701_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return -1;
+  }
+
+  Wire.requestFrom(MT6701_ADDR, 1);
+  if (Wire.available() < 1) {
+    return -1;
+  }
+
+  return Wire.read();
+}
+```
