@@ -1,13 +1,13 @@
 # Hardware considerations
 
-## First a shout out to friends:
-* An open source motor controller from badgineer: [MP2] (https://github.com/badgineer/MP2-ESC). 
-* MESC firmware [MESC](https://github.com/davidmolony/MESC_Firmware). 
-* Sites for PCB and PCBA: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
-
 ## Project plan:
 
-Gonna try to use my open source motor controller, the [MP2-DFN](https://github.com/owhite/MP2-DFN), and this circuit for a [brain board](https://github.com/owhite/MESC_brain_board/blob/main/brainboardV1.0/MESC_brain_board.pdf), a teensy 4.0, and an ESP-32, in combination with [MESC] firmware(https://github.com/davidmolony/MESC_Firmware).
+Gonna try to use my open source motor controller, the [MP2-DFN](https://github.com/owhite/MP2-DFN), and this circuit for a [brain board](https://github.com/owhite/MESC_brain_board/blob/main/brainboardV1.0/MESC_brain_board.pdf), a teensy 4.0, and an ESP-32, in combination with [MESC firmware](https://github.com/davidmolony/MESC_Firmware).
+
+## First a shout out to friends:
+* An open source motor controller from badgineer: [MP2] (https://github.com/badgineer/MP2-ESC). 
+* [MESC firmware](https://github.com/davidmolony/MESC_Firmware). 
+* PCB and PCBA sites: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
 
 ## Hardware
 ### Brain Board 
@@ -18,7 +18,7 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 * Integrates data from the IMU and other sensors
 * Optionally logs data or interfaces with a host computer
 
-### Motor Controller (MESC-based with Custom Firmware)
+### Motor Controller (with custom firmware)
 * Executes low-level motor control (Field-Oriented Control)
 * Supports:
   * Torque mode
