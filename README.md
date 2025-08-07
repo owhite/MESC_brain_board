@@ -2,6 +2,8 @@
 
 [Chatgpt discussion](https://chatgpt.com/c/68653d84-b634-8011-b055-3476bfa95f52)
 
+See github tag [pcb-v1](https://github.com/owhite/MESC_brain_board/releases/tag/pcb-v1) for V1.0
+
 ## Teensy 4.x (Brain Board)
 * 600+ MHz ARM Cortex-M7 — plenty of headroom for filtering, control loops, gait logic, telemetry
 * Tons of I/O for IMU, encoders, RC input, WiFi (via ESP add-on), etc.
