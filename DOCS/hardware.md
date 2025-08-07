@@ -45,7 +45,7 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 * Output via SPI, PWM, or ABI 
 * Provides absolute angle, ideal for FOC and position tracking
 
-When programming the board be sure to do it at +5V over I2C. Suppose you bought a MT6701 board and you wanted to figure the mode it is set in. Use this:
+When programming the board be sure to do it at +5V over I2C. Suppose you bought a MT6701 board and you wanted to figure the mode it is set in. Use this with a arduino-based controller:
 ```
 #include <Wire.h>
 
