@@ -45,7 +45,7 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 * Output via SPI, PWM, or ABI 
 * Provides absolute angle, ideal for FOC and position tracking
 
-Suppose you bought a MT6701 board and you wanted to figure the mode it is set in. Use this:
+When programming the board be sure to do it at +5V over I2C. Suppose you bought a MT6701 board and you wanted to figure the mode it is set in. Use this:
 ```
 #include <Wire.h>
 
@@ -93,6 +93,12 @@ void loop() {
   }
 }
 
+oid writeRegister(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(MT6701_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+}
 
 int readRegister(uint8_t reg) {
   Wire.beginTransmission(MT6701_ADDR);
@@ -109,3 +115,21 @@ int readRegister(uint8_t reg) {
   return Wire.read();
 }
 ```
+
+Here's a code block for setting the mode:
+```
+  // Set ABZ resolution to 1024
+  writeRegister(0x30, 1024 & 0xFF);         // LSB
+  writeRegister(0x31, (1024 >> 8) & 0xFF);  // MSB
+
+  // Set output mode to ABZ
+  writeRegister(0x38, 0x00);
+
+  // EEPROM write sequence
+  writeRegister(0x09, 0xB3);  // key
+  writeRegister(0x0A, 0x05);  // command
+
+  delay(1000); // Wait 1 second
+
+  Serial.println("MT6701 EEPROM programmed. Power-cycle to apply.");
+ ```
