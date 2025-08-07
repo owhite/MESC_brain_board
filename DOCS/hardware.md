@@ -21,21 +21,21 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 ### Motor Controller (MESC-based with Custom Firmware)
 * Executes low-level motor control (Field-Oriented Control)
 * Supports:
- * Torque mode
- * Velocity mode
- * Position mode
+  * Torque mode
+  * Velocity mode
+  * Position mode
 * Reads angular position from the MT6701 encoder via SPI or PWM
 * Computes:
- * Electrical angle for FOC
- * Velocity (from encoder delta over time)
- * Torque (via current sensing or estimation)
+  * Electrical angle for FOC
+  * Velocity (from encoder delta over time)
+  * Torque (via current sensing or estimation)
 * Sends back telemetry via CAN (e.g., torque estimate, velocity, encoder angle)
 
 ### CAN Bus
 * Full-duplex communication between Teensy and motor controllers
 * Carries:
- * Commands: set_torque, set_velocity, enable_motor, zero_encoder, etc.
- * Telemetry: encoder position, estimated torque, velocity, fault codes
+  * Commands: set_torque, set_velocity, enable_motor, zero_encoder, etc.
+  * Telemetry: encoder position, estimated torque, velocity, fault codes
 * Real-time performance with minimal latency
 * Can support multiple motor controllers on the same bus
 
