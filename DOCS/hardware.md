@@ -116,20 +116,76 @@ int readRegister(uint8_t reg) {
 }
 ```
 
-Here's a code block for setting the mode:
+Here's code for setting the mode:
 ```
-  // Set ABZ resolution to 1024
-  writeRegister(0x30, 1024 & 0xFF);         // LSB
-  writeRegister(0x31, (1024 >> 8) & 0xFF);  // MSB
+#include <Wire.h>
+#define MT6701_ADDR 0x06  // Change if your MT6701 has a different address
 
-  // Set output mode to ABZ
-  writeRegister(0x38, 0x00);
+// ---------- I2C helper ----------
+void writeRegister(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(MT6701_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+}
 
-  // EEPROM write sequence
-  writeRegister(0x09, 0xB3);  // key
-  writeRegister(0x0A, 0x05);  // command
+int readRegister(uint8_t reg) {
+  Wire.beginTransmission(MT6701_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return -1;
+  Wire.requestFrom(MT6701_ADDR, 1);
+  if (Wire.available() < 1) return -1;
+  return Wire.read();
+}
 
-  delay(1000); // Wait 1 second
+// ---------- Setup ----------
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Wire.setClock(400000);
 
-  Serial.println("MT6701 EEPROM programmed. Power-cycle to apply.");
+  Serial.println("Programming MT6701 to 1024 PPR...");
+
+  // 1. Set ABZ_RES to 0x3FF (1023 decimal => 1024 PPR)
+  uint16_t abz_res = 0x03FF;
+  writeRegister(0x30, (abz_res >> 8) & 0x03); // bits 9:8
+  writeRegister(0x31, abz_res & 0xFF);        // bits 7:0
+
+  // 2. EEPROM program sequence
+  writeRegister(0x09, 0xB3); // EEPROM key
+  writeRegister(0x0A, 0x05); // EEPROM command
+
+  // 3. Wait >600 ms for EEPROM write
+  delay(1000);
+
+  Serial.println("EEPROM programmed. Power-cycle MT6701 to apply changes.");
+  Serial.println("Now reading back PPR every second...");
+}
+
+// ---------- Loop: verify every second ----------
+void loop() {
+  int r29 = readRegister(0x29); // ABZ/UVW select
+  int r30 = readRegister(0x30); // upper bits of PPR
+  int r31 = readRegister(0x31); // lower bits of PPR
+
+  if (r29 < 0 || r30 < 0 || r31 < 0) {
+    Serial.println("I2C read error");
+  } else {
+    bool abz_selected = ((r29 & (1 << 6)) == 0); // 0 = ABZ
+    uint16_t abz_code = ((r30 & 0x03) << 8) | (uint8_t)r31;
+    uint16_t abz_ppr  = abz_code + 1;            // encoded as value+1
+
+    Serial.print("ABZ selected: ");
+    Serial.println(abz_selected ? "YES" : "NO");
+
+    Serial.print("ABZ PPR (pulses/rev): ");
+    Serial.println(abz_ppr);
+
+    Serial.print("Quadrature counts/rev (4x): ");
+    Serial.println((uint32_t)abz_ppr * 4);
+    Serial.println();
+  }
+
+  delay(1000); // read once per second
+}
  ```
