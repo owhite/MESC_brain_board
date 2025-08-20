@@ -2767,8 +2767,8 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "1e5dfde2-5d48-47d3-9336-bd102b6f7873")
-		(property "Reference" "20k_2"
-			(at 90.043 75.565 0)
+		(property "Reference" "5k_2"
+			(at 90.17 74.9299 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2776,8 +2776,8 @@
 				(justify right)
 			)
 		)
-		(property "Value" "20k"
-			(at 90.043 78.105 0)
+		(property "Value" "5k"
+			(at 90.17 77.4699 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2830,7 +2830,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "20k_2")
+					(reference "5k_2")
 					(unit 1)
 				)
 			)
