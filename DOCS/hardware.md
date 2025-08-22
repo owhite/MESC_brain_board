@@ -8,7 +8,8 @@ Gonna try to use my open source motor controller, the [MP2-DFN](https://github.c
 * [MP2](https://github.com/badgineer/MP2-ESC), an open source motor controller from badgineer. 
 * [MESC firmware](https://github.com/davidmolony/MESC_Firmware). 
 * [Netzpfuscher's](https://github.com/Netzpfuscher/TTerm) incredible TTerm work
-* PCB and PCBA sites: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
+
+And a shout out to the PCB and PCBA sites: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
 
 ## Hardware
 ### Brain Board 
