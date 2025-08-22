@@ -41,12 +41,10 @@
 * CAN connector (for MESC motor control)
 
 ## Chapters to my story
-* Hardware considerations [LINK](DOCS/hardware.md)
-* FreeRTOS considerations [LINK](DOCS/free_rtos.md)
-* Brain board firmware specs [LINK](DOCS/software_specs.md)
-* Using the MT6701 [LINK](DOCS/MT6701.md)
-
-[Usage Instructions](DOCS/usage.md)
+* Hardware considerations [[LINK](DOCS/hardware.md)]
+* FreeRTOS considerations [[LINK](DOCS/free_rtos.md)]
+* Brain board firmware specs [[LINK](DOCS/software_specs.md)]
+* Using the MT6701 [[LINK](DOCS/MT6701.md)]
 
 ## NOT IMPLEMENTED
 
