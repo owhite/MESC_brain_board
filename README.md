@@ -40,6 +40,11 @@
 * Reserved 2 GPIO pins on Teensy for emergency shutoff to MESC
 * CAN connector (for MESC motor control)
 
+## Chapters to my story
+* hardware considerations
+* FreeRTOS considerations
+* Brain board firmware specs
+
 ## NOT IMPLEMENTED
 
 * Optional I²C header (for sensors like INA219 or IMU)
