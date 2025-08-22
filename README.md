@@ -69,7 +69,9 @@
 
 ## NOTES
 
-ever wanted to change all the names of kicad files at once? use this:
+ever wanted to change all the names of kicad files at once?
+
+use this:
 ```
-python3 replace_kicad_names.py VESC_brain_board MESC_brain_board
+python3 [replace_kicad_names.py](replace_kicad_names.py) VESC_brain_board MESC_brain_board
 ```
