@@ -4,9 +4,10 @@
 
 Gonna try to use my open source motor controller, the [MP2-DFN](https://github.com/owhite/MP2-DFN), and this circuit for a [brain board](https://github.com/owhite/MESC_brain_board/blob/main/brainboardV1.0/MESC_brain_board.pdf), a teensy 4.0, and an ESP-32, in combination with [MESC firmware](https://github.com/davidmolony/MESC_Firmware).
 
-## First a shout out to friends:
+## To be clear, this would never happen without
 * [MP2](https://github.com/badgineer/MP2-ESC), an open source motor controller from badgineer. 
 * [MESC firmware](https://github.com/davidmolony/MESC_Firmware). 
+* [Netzpfuscher's](https://github.com/Netzpfuscher/TTerm) incredible TTerm work
 * PCB and PCBA sites: [pcbway.com](https://www.pcbway.com/) and [jlcpcb.com](https://jlcpcb.com/).
 
 ## Hardware
