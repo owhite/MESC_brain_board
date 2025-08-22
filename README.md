@@ -22,7 +22,11 @@
 ## Why This Combo Works So Well for a Walking or Balancing Robot
 * Teensy: Runs the high-level brain → gait generator, balance estimator, RC inputs
 * MESC: Handles the low-level muscle control → torque or velocity loops per joint
-* ESP32: Easy to log and analyze later
+* ESP32: Easy to log and analyze later, pumps UDP to the computer
+* Desktop computer
+ - perfectly adequate way of viewing high speed data
+ - helps with modeling
+ - keyboards are useful for input
 
 ## FEATURES
 
