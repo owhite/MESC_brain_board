@@ -24,9 +24,9 @@
 * MESC: Handles the low-level muscle control → torque or velocity loops per joint
 * ESP32: Easy to log and analyze later, pumps UDP to the computer
 * Desktop computer
- - perfectly adequate way of viewing high speed data
- - helps with modeling
- - keyboards are useful for input
+  * perfectly adequate way of viewing high speed data
+  * helps with modeling
+  * keyboards are useful for input
 
 ## FEATURES
 
