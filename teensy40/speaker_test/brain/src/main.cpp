@@ -5,10 +5,6 @@
 
 static TonePlayer g_tone;
 
-static constexpr uint32_t PB_BEEP_HZ = 2000;
-static constexpr uint32_t PB_BEEP_MS = 150;
-static constexpr uint32_t PB_GAP_MS  = 100;
-
 static PBHandle g_button;
 PBState pb_state;
 
@@ -56,11 +52,48 @@ static void can_drain_and_parse() {
   }
 }
 
+// ---------- RC PWM capture (4 channels) ----------
+static const uint8_t RC_PINS[RC_CH_COUNT] = { RC_INPUT1, RC_INPUT2, RC_INPUT3, RC_INPUT4}; 
+
+static volatile uint32_t rc_rise_us[RC_CH_COUNT]   = {0};
+static volatile uint16_t rc_pulse_us[RC_CH_COUNT]  = {1500,1500,1500,1500}; // default 1.5ms
+static volatile uint8_t  rc_updated[RC_CH_COUNT]   = {0};
+
+static inline void rc_edge_isr_common(uint8_t ch) {
+  const bool level = digitalReadFast(RC_PINS[ch]);
+  const uint32_t now = micros();
+  if (level) {
+    rc_rise_us[ch] = now;
+  } else {
+    rc_pulse_us[ch] = (uint16_t)(now - rc_rise_us[ch]);  // handles wrap naturally
+    rc_updated[ch]  = 1;
+  }
+}
+
+// Separate ISRs (attachInterrupt can't pass args)
+static void rc1_isr() { rc_edge_isr_common(0); }
+static void rc2_isr() { rc_edge_isr_common(1); }
+static void rc3_isr() { rc_edge_isr_common(2); }
+static void rc4_isr() { rc_edge_isr_common(3); }
+
+// Optional helper to read latest width
+static inline uint16_t rc_get_pulse_us(uint8_t ch, bool *had_update = nullptr) {
+  if (ch >= RC_CH_COUNT) return 0;
+  uint16_t v = rc_pulse_us[ch];     // 16-bit read is atomic on ARM
+  if (had_update && rc_updated[ch]) { *had_update = true; rc_updated[ch] = 0; }
+  return v;
+}
+
 // ---- LED instances ----
 static LEDCtrl g_led_red;
 static LEDCtrl g_led_green;
 
 void control_step(uint32_t now_us) {
+  uint16_t ch1 = rc_get_pulse_us(0, nullptr);
+  uint16_t ch2 = rc_get_pulse_us(1, nullptr);
+  uint16_t ch3 = rc_get_pulse_us(2, nullptr);
+  uint16_t ch4 = rc_get_pulse_us(3, nullptr);
+  (void)now_us; (void)ch1; (void)ch2; (void)ch3; (void)ch4;
 
   // TODO: estimator + controller; prepare CAN command frames and send quickly.
 }
@@ -71,11 +104,13 @@ void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 1500) {}
 
+  tone_init(&g_tone, SPEAKER_PIN);
+  tone_start(&g_tone, /*freq_hz=*/2000, /*dur_ms=*/300, /*silence_ms=*/200);
+
   // LEDs
   led_init(&g_led_red,   LED1_PIN, LED_BLINK_SLOW);
   led_init(&g_led_green, LED2_PIN, LED_BLINK_FAST);
   pb_init(&g_button, PUSHBUTTON_PIN, true, 50000u);
-  tone_init(&g_tone, SPEAKER_PIN);
   
   // ---- CAN init ----
   Can.begin();                           // REQUIRED first
@@ -83,9 +118,18 @@ void setup() {
   Can.onReceive(can_rx_cb);              // catch-all callback
   Can.enableMBInterrupts();
 
+  // ---- RC PWM pins + interrupts ----
+  pinMode(RC_INPUT1, INPUT);
+  pinMode(RC_INPUT2, INPUT);
+  pinMode(RC_INPUT3, INPUT);
+  pinMode(RC_INPUT4, INPUT);
+  attachInterrupt(digitalPinToInterrupt(RC_INPUT1), rc1_isr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RC_INPUT2), rc2_isr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RC_INPUT3), rc3_isr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RC_INPUT4), rc4_isr, CHANGE);
+
   // ---- Control tick ISR ----
   //   set 1000 µs for 1 kHz
-  g_ctrlTimer.priority(16);
   g_ctrlTimer.begin(control_isr, CONTROL_PERIOD_US); 
 }
 
@@ -100,17 +144,33 @@ void loop() {
     control_step(g_control_now_us);
   }
 
-
-
   // ---------- LOW PRIORITY CHORES ----------
   //   Everything here must be non-blocking
   //
   // LED stuff
-
   uint32_t now = micros();
-  tone_update(&g_tone, now);
   led_update(&g_led_red, now);
   led_update(&g_led_green, now);
+
+  // pushbutton stuff
+  pb_update(&g_button, now);
+
+  while (pb_consume_change(&g_button, &pb_state)) {
+    if (pb_state == PB_PRESSED) {
+      g_pb_armed = true;
+    }
+    else {
+      if (g_pb_armed) {
+	LEDState cur = g_led_red.state;
+	LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
+	if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
+	led_set_state(&g_led_red, next);
+	g_pb_armed = false;
+      }
+    }
+  }
+
+  tone_update(&g_tone, now);
 
   // Polling examples
   if (tone_is_playing(&g_tone)) {
@@ -121,23 +181,4 @@ void loop() {
     // all done; could schedule another tone
   }
 
-  // pushbutton stuff
-  pb_update(&g_button, now);
-
-  while (pb_consume_change(&g_button, &pb_state)) {
-    if (pb_state == PB_PRESSED) {
-      // Beep immediately on press (non-blocking)
-      tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-      g_pb_armed = true;   // remember there was a press
-    } else { // PB_RELEASED
-      if (g_pb_armed) {
-	// Toggle red LED speed on release (your existing behavior)
-	LEDState cur  = g_led_red.state;
-	LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
-	if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
-	led_set_state(&g_led_red, next);
-	g_pb_armed = false;
-      }
-    }
-  }
 }

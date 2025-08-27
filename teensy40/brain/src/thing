@@ -1,14 +1,11 @@
+
+
 #include "main.h"
 #include "LED.h"
 #include "pushbutton.h"
 #include "tone_player.h"
 
 static TonePlayer g_tone;
-
-static constexpr uint32_t PB_BEEP_HZ = 2000;
-static constexpr uint32_t PB_BEEP_MS = 150;
-static constexpr uint32_t PB_GAP_MS  = 100;
-
 static PBHandle g_button;
 PBState pb_state;
 
@@ -71,11 +68,14 @@ void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 1500) {}
 
+  tone_init(&g_tone, SPEAKER_PIN);
+  tone_start(&g_tone, /*freq_hz=*/2000, /*dur_ms=*/300, /*silence_ms=*/200);
+  tone_update(&g_tone, micros()); 
+
   // LEDs
   led_init(&g_led_red,   LED1_PIN, LED_BLINK_SLOW);
   led_init(&g_led_green, LED2_PIN, LED_BLINK_FAST);
   pb_init(&g_button, PUSHBUTTON_PIN, true, 50000u);
-  tone_init(&g_tone, SPEAKER_PIN);
   
   // ---- CAN init ----
   Can.begin();                           // REQUIRED first
@@ -85,8 +85,8 @@ void setup() {
 
   // ---- Control tick ISR ----
   //   set 1000 µs for 1 kHz
-  g_ctrlTimer.priority(16);
   g_ctrlTimer.begin(control_isr, CONTROL_PERIOD_US); 
+
 }
 
 void loop() {
@@ -108,7 +108,7 @@ void loop() {
   // LED stuff
 
   uint32_t now = micros();
-  tone_update(&g_tone, now);
+  // tone_update(&g_tone, now);
   led_update(&g_led_red, now);
   led_update(&g_led_green, now);
 
@@ -124,15 +124,14 @@ void loop() {
   // pushbutton stuff
   pb_update(&g_button, now);
 
+
   while (pb_consume_change(&g_button, &pb_state)) {
     if (pb_state == PB_PRESSED) {
-      // Beep immediately on press (non-blocking)
-      tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-      g_pb_armed = true;   // remember there was a press
-    } else { // PB_RELEASED
+      g_pb_armed = true;
+    }
+    else {
       if (g_pb_armed) {
-	// Toggle red LED speed on release (your existing behavior)
-	LEDState cur  = g_led_red.state;
+	LEDState cur = g_led_red.state;
 	LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
 	if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
 	led_set_state(&g_led_red, next);
