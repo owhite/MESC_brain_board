@@ -17,8 +17,9 @@
 - Running at 500–1000 Hz provides plenty of bandwidth to implement LQR-based stabilization effectively—while being manageable for embedded systems like Teensy + ESCs.
 
 ## There already is a telemetry-plane (slow, ~10–50 Hz)
-- MESC “fast” telemetry is actually ~10 Hz (every 100 ms) — too slow for balancing.
 - Useful for monitoring/logging: Vbus, Ibus, eHz, Idq/Vdq, state, etc.
+- Will not be used for balancing
+- MESC “fast” telemetry is actually ~10 Hz (every 100 ms)
 - Not for stabilization; too slow for 1 kHz balancing.
 
 ## Bus Load Reality Check (CAN 2.0 @ 1 Mb/s)
@@ -128,9 +129,9 @@ void TASK_CAN_telemetry_posvel(TASK_CAN_handle *handle) {
 ```
 
 ## Receiving CAN commands from Teensy
-- MESC already spawns TASK_CAN_rx at high priority (osPriorityAboveNormal) to process incoming frames.
-- Torque setpoint commands are mapped to CAN_ID_IQREQ, which updates _motor->FOC.Idq_req.q.
-- _motor->FOC.Idq_req.q is a signed float:
+- MESC already spawns `TASK_CAN_rx` at high priority (`osPriorityAboveNormal`) to process incoming frames.
+- Torque setpoint commands are mapped to CAN_ID_IQREQ, which updates `_motor->FOC.Idq_req.q`.
+- `_motor->FOC.Idq_req.q` is a signed float:
   - Positive → forward torque
   - Negative → reverse torque
 - FOC loop (82 kHz) consumes this value each cycle; if no new frame arrives, it reuses the last command.
