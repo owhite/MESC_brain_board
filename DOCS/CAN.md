@@ -127,6 +127,15 @@ void TASK_CAN_telemetry_posvel(TASK_CAN_handle *handle) {
 #endif
 ```
 
+## Receiving CAN commands from Teensy
+- MESC already spawns TASK_CAN_rx at high priority (osPriorityAboveNormal) to process incoming frames.
+- Torque setpoint commands are mapped to CAN_ID_IQREQ, which updates _motor->FOC.Idq_req.q.
+- _motor->FOC.Idq_req.q is a signed float:
+  - Positive → forward torque
+  - Negative → reverse torque
+- FOC loop (82 kHz) consumes this value each cycle; if no new frame arrives, it reuses the last command.
+- Teensy should send one new command per 1 kHz control tick, ensuring ESC always has a fresh reference.
+
 # Teensy side considerations
 ## Teensy Architecture (not using RTOS)
 - Timing & Priority
