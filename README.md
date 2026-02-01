@@ -86,6 +86,7 @@ A balancing robot is a complex closed-loop control problem. As far as I know I n
 - When the ESC behavior looked inconsistent, we debugged line by line until we understood it.
 - When I needed to test an assumption, it helped me design the test.
 - When something behaved strangely, I could describe it and get three possible hypotheses to try.
+- ChatG is uncanny at image analysis. It reads part numbers off of chips and will take you to the spec sheet. Take a picture of a square wave of your scope - - the damn thing will tell you the frequency, amplitude of the wave. It also taught me how to set up [one-shot measurements](DOCS/BLDC_inductance_measurement.md). 
 
 The project was far less like copying code from the internet and more like having a very patient senior engineer building one-off code bundles to eventually get this thing to stand. 
 

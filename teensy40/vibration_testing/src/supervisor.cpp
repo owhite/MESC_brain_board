@@ -51,8 +51,8 @@ float angle_diff(float target, float actual) {
   return diff - M_PI;
 }
 
-volatile bool dataReady = false;
-void setImuFlag() { dataReady = true; }
+volatile uint32_t imu_drdy_count = 0;
+void setImuFlag() { imu_drdy_count++; }
 
 // ---------------- Supervisor Initialization ----------------
 // Sets up ESCs, IMU, RC inputs, and resets timing/telemetry stats.
@@ -114,8 +114,8 @@ void init_supervisor(Supervisor_typedef *sup,
   // attaching the interrupt to micro controller pin INT_PIN
   pinMode(INT_PIN, INPUT);
   attachInterrupt(INT_PIN, setImuFlag, RISING);
-  imu.setAccelODR(ICM42688::odr2k);
-  imu.setGyroODR(ICM42688::odr2k);
+  imu.setAccelODR(ICM42688::odr1k);
+  imu.setGyroODR(ICM42688::odr1k);
   imu.enableDataReadyInterrupt();
 
   // Timing stats initialization
@@ -339,8 +339,13 @@ void controlLoop(ICM42688 &imu, Supervisor_typedef *sup,
     sup->timing.overruns++;
   }
   // ---- IMU: read & update orientation / pitch using Mahony ----
-  if (dataReady) {
-    dataReady = false;
+
+  static uint32_t last_imu_count = 0;
+  uint32_t now_count = imu_drdy_count;
+
+  if (now_count != last_imu_count) {
+    last_imu_count = now_count;
+
     imu.getAGT();
 
     uint32_t now_imu_us = micros();

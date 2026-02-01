@@ -39,11 +39,11 @@ int ICM42688::begin() {
 		// begin SPI communication
 		_spi->begin();
 	} else {  // using I2C for communication
-		// starting the I2C bus
-	  // _i2c->begin(_sda_pin, _scl_pin);
-		_i2c->begin();
-		// setting the I2C clock
-		_i2c->setClock(I2C_CLK);
+	  // starting the I2C bus
+	  // teensy only version:
+	  _i2c->begin();
+	  // setting the I2C clock
+	  _i2c->setClock(I2C_CLK);
 	}
 
 	// reset the ICM42688

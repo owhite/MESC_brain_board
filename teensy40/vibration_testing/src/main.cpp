@@ -29,7 +29,7 @@ PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
 static LEDCtrl g_led_red;
 LEDCtrl g_led_green;
 
-ICM42688 imu(SPI, CS_PIN);
+ICM42688 imu(SPI, CS_PIN, IMU_SPI_HS_CLOCK);
 
 void setup() {
 #if SERIAL_WRITE
@@ -58,30 +58,35 @@ void setup() {
   pinMode(TEST_PIN, OUTPUT);
 
   init_supervisor(&supervisor,
-		  imu,
+                  imu,
                   2,           // esc_count -- FIX: dont hard code this number
                   esc_names,   // ESC names
                   esc_ids,     // ESC node IDs
                   rc_pins,     // RC pins
                   4);          // RC count -- FIX: dont hard code this number
-
-
 }
 
 void loop() {
   // -------- HIGH PRIORITY --------
   // Set to CONTROL_PERIOD_US = 1000 µs (1000 Hz).
-  //   note that is faster than rate of CAN coming from MESC
-  // The system uses an ISR-driven scheduler to tell the main loop to go into controlLoop. 
-  // ---
+  // The system uses an ISR-driven scheduler to tell the main loop to go into controlLoop.
+  //
+  // IMPORTANT: clear g_control_due atomically to avoid missing ticks if the ISR fires
+  // while controlLoop() is running.
   if (g_control_due) {
-    controlLoop(imu, &supervisor, Can1);
+    uint32_t tick_us;
+
+    noInterrupts();
     g_control_due = false;
+    tick_us = g_control_now_us;
+    interrupts();
+
+    supervisor.timing.last_tick_us = tick_us;
+    controlLoop(imu, &supervisor, Can1);
   }
 
   // -------- CAN POLLING --------
-  // Non-blocking and not based on an ISR because FLEXCAN_T4 did seem to work. 
-  // ---
+  // Non-blocking and not based on an ISR because FLEXCAN_T4 did seem to work.
   CAN_message_t msg;
   while (Can1.read(msg)) {
     canBufferPush(canRxBuf, msg);
@@ -94,8 +99,6 @@ void loop() {
 
   // -------- LOW PRIORITY --------
   // These functions are intentionally throttled using a x10 time divider
-  // ---
-
   static uint32_t last_lowprio_us = 0;
   uint32_t now_us = micros();
 
@@ -105,52 +108,51 @@ void loop() {
     while (Serial.available()) {
       char c = Serial.read();
       if (c == '\n') {
-	// Try to parse the accumulated line
-	JsonDocument doc;
-	DeserializationError err = deserializeJson(doc, input);
-	if (!err) {
-	  supervisor.user_pulse_torque = DEFAULT_PULSE_TORQUE;
-	  supervisor.user_pulse_us     = DEFAULT_PULSE_US;
-	  supervisor.user_total_us     = DEFAULT_TOTAL_US;
-	  supervisor.user_Kd_term      = DEFAULT_KD_TERM;
-	  supervisor.user_Kp_term      = DEFAULT_KP_TERM;
+        // Try to parse the accumulated line
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, input);
+        if (!err) {
+          supervisor.user_pulse_torque = DEFAULT_PULSE_TORQUE;
+          supervisor.user_pulse_us     = DEFAULT_PULSE_US;
+          supervisor.user_total_us     = DEFAULT_TOTAL_US;
+          supervisor.user_Kd_term      = DEFAULT_KD_TERM;
+          supervisor.user_Kp_term      = DEFAULT_KP_TERM;
 
-	  if (doc.containsKey("cmd") && doc["cmd"] == "verify_angle") {
-	    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-	    if (supervisor.mode == SUP_VERIFY_ANGLE) {
-	      supervisor.mode = SUP_MODE_IDLE;
-	    }
-	    else {
-	      supervisor.mode = SUP_VERIFY_ANGLE;
-	    }
-	  }
+          if (doc.containsKey("cmd") && doc["cmd"] == "verify_angle") {
+            tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+            if (supervisor.mode == SUP_VERIFY_ANGLE) {
+              supervisor.mode = SUP_MODE_IDLE;
+            }
+            else {
+              supervisor.mode = SUP_VERIFY_ANGLE;
+            }
+          }
 
- 	  // start with json command:
-	  //   {'cmd': 'torque_reps', 'pulse_torque': 0.4, 'pulse_us': 250000}
+          // start with json command:
+          //   {'cmd': 'torque_reps', 'pulse_torque': 0.4, 'pulse_us': 250000}
+          if (doc.containsKey("cmd") && doc["cmd"] == "torque_reps") {
+            if (doc.containsKey("pulse_torque"))
+              supervisor.user_pulse_torque = doc["pulse_torque"];
+            if (doc.containsKey("pulse_us"))
+              supervisor.user_pulse_us = doc["pulse_us"];
 
-	  if (doc.containsKey("cmd") && doc["cmd"] == "torque_reps") {
-	    if (doc.containsKey("pulse_torque"))
-	      supervisor.user_pulse_torque = doc["pulse_torque"];
-	    if (doc.containsKey("pulse_us"))
-	      supervisor.user_pulse_us = doc["pulse_us"];
+            tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+            if (supervisor.mode == SUP_TORQUE_REPS) {
+              supervisor.mode = SUP_MODE_IDLE;
+            }
+            else {
+              supervisor.mode = SUP_TORQUE_REPS;
+            }
 
-	    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-	    if (supervisor.mode == SUP_TORQUE_REPS) {
-	      supervisor.mode = SUP_MODE_IDLE;
-	    }
-	    else {
-	      supervisor.mode = SUP_TORQUE_REPS;
-	    }
-
-	    Serial.printf("{\"cmd\":\"PRINT\",\"note\":\"%s\",\"pulse_torque\":%.3f,\"pulse_us\":%lu}\r\n",
+            Serial.printf("{\"cmd\":\"PRINT\",\"note\":\"%s\",\"pulse_torque\":%.3f,\"pulse_us\":%lu}\r\n",
                           "Torque response run started",
                           supervisor.user_pulse_torque,
                           supervisor.user_pulse_us);
-	  }
-	}
-	input = "";  // reset buffer
+          }
+        }
+        input = "";  // reset buffer
       } else {
-	input += c;  // append char to buffer
+        input += c;  // append char to buffer
       }
     }
 
@@ -171,18 +173,18 @@ void loop() {
       PBState pb_state = g_button.getState();
 
       if (pb_state == PB_PRESSED) {
-	// SPEAKER
-	tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+        // SPEAKER
+        tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
       }
       else if (pb_state == PB_RELEASED && g_button.isArmed()) {
 
-	supervisor.mode = SUP_MODE_IDLE;
+        supervisor.mode = SUP_MODE_IDLE;
 
-	LEDState cur  = g_led_red.state;
-	LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
-	if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
-	led_set_state(&g_led_red, next);
-	g_button.clearArmed();
+        LEDState cur  = g_led_red.state;
+        LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
+        if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
+        led_set_state(&g_led_red, next);
+        g_button.clearArmed();
       }
       g_button.clearChanged();
     }
