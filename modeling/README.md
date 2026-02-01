@@ -32,7 +32,7 @@ My current bot in CAD:
 - Mount the imu over the axle
 - The IMU should be placed away from the axis of rotation
 - Vibration isolation is a huge issue [see here](../teensy40/vibration_testing/README.md) and [here](..//teensy40/mpu6050_spec.md)
-- Construct a robot [carcass]("../DOCS/IMAGES/ROBOT_CARASS1.png"). This allows you to test all cabling, connections and motor mounts before cramming into your TWR. It also greatly simplifies parameterizing the ESC, using a scope if neccessary, and general debugging. This is another one of those: "if you cant get this step to work, youre certainly not going to get the final robot to work". 
+- Construct a robot [carcass]("../../DOCS/IMAGES/ROBOT_CARASS1.png"). This allows you to test all cabling, connections and motor mounts before cramming into your TWR. It also greatly simplifies parameterizing the ESC, using a scope if neccessary, and general debugging. This is another one of those: "if you cant get this step to work, youre certainly not going to get the final robot to work". 
 
 
 ## General workflow
