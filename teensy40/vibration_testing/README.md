@@ -72,8 +72,3 @@ This also helped to follow the status of vibration reduction:
 
 `./plot_amag.py -p /dev/cu.usbmodem178888901`
 
-## Torque validation
-
-Did not go too crazy with this so far. Used the MESC serial to show 
-- the bot can lift itself up in
-- both motors are roughly equal

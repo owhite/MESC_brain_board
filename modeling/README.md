@@ -43,18 +43,18 @@ $ ./spin_decay.py /dev/cu.usbmodem181813701 --J 0.00309
    └── compute damping coefficient (b_Nm_s_per_rad)
    ↓
 
-$ ./apps/generate_LQR_data.py -i data/GL80/GL80_params.json 
+$ ./apps/generate_TWR_data.py -i data/GL80/GL80_params.json 
    ↓
    ├── computes mass, CoM, inertia
    └── writes JSON GL80_metadata.json
    ↓
-$ ./verify_TWR_data.py LQR_bot_data.json
+$ ./verify_TWR_data.py TWR_bot_data.json
    ↓
    └── sanity checks lots of values
    ↓
 View results: 
    ↓
-   └── ./plot_TWR_response.py LQR_bot_data.json 
+   └── ./plot_TWR_response.py TWR_bot_data.json 
 ```
 
 **NOTE:** I strongly recommend that you review each of the steps with ChatGPT. Show it the code and describe what you are doing, chat can play a role of lab partner and explain the purpose of each step. 
@@ -120,7 +120,7 @@ ChatG says this is exactly the right order of magnitude for:
 
 ## Review of TWR data
 
-Run: ```./apps/generate_LQR_data.py -i data/GL80/GL80_params.json ```
+Run: ```./apps/generate_TWR_data.py -i data/GL80/GL80_params.json ```
 
 The program reads the STL assembly and per-part masses to compute the robot’s total mass, body and total centers of mass, and body moment of inertia, then builds the linearized continuous and discrete state-space models of the balancing robot about the wheel axle. It then computes the continuous and discrete LQR gains and reports the closed-loop eigenvalues to verify stability and dynamic behavior.
 
@@ -134,7 +134,7 @@ The program computes the closed-loop eigenvalues of the system using the LQR gai
 	"axle_origin": [0.0, 0.0, 52.78],
 	"axle_vector": [0.0, 1.0, 0.0],
 	"input_path": "/Users/owhite/MESC_brain_board/modeling/data/GL80",
-	"output_file_name": "GL80_LQR_params.json"
+	"output_file_name": "GL80_TWR_params.json"
     }
 ```
 
@@ -232,7 +232,7 @@ So, physically:
 
 ----
 
-Run: ```$ ./apps/verify_LQR_data.py data/GL80/GL80_metadata.json ```
+Run: ```$ ./apps/verify_TWR_data.py data/GL80/GL80_metadata.json ```
 
 Results:
 

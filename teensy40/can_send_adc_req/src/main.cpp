@@ -71,8 +71,10 @@ void handlePosVel(const CAN_message_t &msg) {
     memcpy(&pos, &u0, sizeof(float));
     memcpy(&vel, &u1, sizeof(float));
 
+    /*
     Serial.printf("{\"t_us\":%lu,\"sender\":%u,\"pos\":%.6f,\"vel\":%.6f}\r\n",
                   micros(), receiver, pos, vel);
+    */ 
   }
 }
 
@@ -105,7 +107,7 @@ void setup() {
   pinMode(PUSHBUTTON_PIN, INPUT_PULLUP);
 
   pinMode(LED_PIN, OUTPUT);
-  digitalWriteFast(LED_PIN2, HIGH);
+  digitalWriteFast(LED_PIN, HIGH);
 
   Serial.println("Press any key to toggle motion START/STOP.");
 
@@ -176,8 +178,10 @@ void loop() {
       float zero = 0.0f;
       pack_float(zero, tx.buf + 4);
       Can1.write(tx);
+      /*
       Serial.printf("STOP: Sent Iq_req=%.3f A to ESC node_id=%u (CAN ID=0x%08X)\r\n",
                     cmd, esc_id, tx.id);
+      */
     }
     return;
   }
@@ -211,8 +215,10 @@ void loop() {
     pack_float(zero, tx.buf + 4);
     Can1.write(tx);
 
+    /* 
     Serial.printf("State %u: Sent Iq_req=%.3f A to ESC node_id=%u (CAN ID=0x%08X)\r\n",
                   state, cmd, esc_id, tx.id);
+    */ 
   }
 }
 #endif

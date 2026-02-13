@@ -5,38 +5,33 @@
 	"wheel_radius": 52.78,
 	"axle_origin": [0.0, 0.0, 52.78],
 	"axle_vector": [0.0, 1.0, 0.0],
-	"input_path": "/Users/owhite/MESC_brain_board/modeling/data/GL80",
+	"input_path": "/Users/owhite/balancing-robot-notes/modeling/data/GL80",
 	"output_file_name": "GL80_metadata.json"
     },
 
     "meshes": {
 	"battery.stl": {
-	    "mass": 235,
+	    "mass": 242,
 	    "include_in_COM": true,
 	    "include_in_body_inertia": true
 	},
-	"battery_clamp.stl": {
-	    "mass": 8,
-	    "include_in_COM": true,
-	    "include_in_body_inertia": true
-	},
-	"battery_connect.stl": {
-	    "mass": 43,
+	"battery_connector.stl": {
+	    "mass": 49,
 	    "include_in_COM": true,
 	    "include_in_body_inertia": true
 	},
 	"brain_board.stl": {
-	    "mass": 53,
+	    "mass": 44,
 	    "include_in_COM": true,
 	    "include_in_body_inertia": true
 	},
 	"frame.stl": {
-	    "mass": 105,
+	    "mass": 99,
 	    "include_in_COM": true,
 	    "include_in_body_inertia": true
 	},
 	"pcb_encoder_mounts.stl": {
-	    "mass": 118,
+	    "mass": 172,
 	    "include_in_COM": true,
 	    "include_in_body_inertia": true
 	},
@@ -51,12 +46,12 @@
 	    "include_in_body_inertia": true
 	},
 	"rotors.stl": {
-	    "mass": 220,
+	    "mass": 240,
 	    "include_in_COM": false,
 	    "include_in_body_inertia": false
 	},
 	"wheels.stl": {
-	    "mass": 106,
+	    "mass": 99,
 	    "include_in_COM": false,
 	    "include_in_body_inertia": false
 	}
