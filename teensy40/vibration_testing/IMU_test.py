@@ -1,141 +1,183 @@
 #!/usr/bin/env python3
+"""
+Live IMU plotter for Teensy 4.0 telemetry JSON.
 
-# Test the IMU.
-#  command line:
-#
-# $ ./IMU_test.py -p /dev/cu.usbmodem178888901
-#
-# Interface opens up and hit the run button
+Expected JSON line format (new output):
+{"t":..., "pitch":..., "rate":..., "rms_raw":..., "rms_filt":..., "n_rms":..., "age_us":..., "valid":..., "exec_us":..., "ovr":...}
 
-import sys, json, serial, math
+Units assumed:
+- pitch: degrees
+- rate: degrees/second
+- rms_raw: radians/second   (gyro raw RMS)
+- rms_filt: radians/second  (filtered RMS)
+- age_us: microseconds
+- exec_us: microseconds
+"""
+
+import json
 import argparse
+import serial
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.widgets import Button, Slider
-import numpy as np
 
-def compute_rms(values):
-    arr = np.array(values)
-    return np.sqrt(np.mean(arr**2))
+RAD2DEG = 180.0 / np.pi
 
-def send_run_command(event, ser):
-    """Handle Run button click → tell Teensy to enter balance mode."""
-    msg = {"cmd": "verify_angle"}
-    print("TX:", msg)
+
+def send_run_command(_event, ser):
+    """Tell Teensy to toggle/enter balance mode."""
+    msg = {"cmd": "run_balance"}
     ser.write((json.dumps(msg) + "\n").encode("utf-8"))
+    print("TX:", msg)
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Two-Wheeled Robot live IMU plotter.")
-    parser.add_argument("-p", "--port", required=True, help="Serial port (e.g. /dev/ttyACM0)")
+    parser = argparse.ArgumentParser(description="Balancing robot IMU live plotter (Teensy JSON).")
+    parser.add_argument("-p", "--port", required=True, help="Serial port (e.g. /dev/cu.usbmodemXXXX)")
+    parser.add_argument("-b", "--baud", type=int, default=921600, help="Baud rate (default: 921600)")
+    parser.add_argument("--max-points", type=int, default=4000, help="Rolling plot buffer length (default: 4000)")
+    parser.add_argument("--expect-n", type=int, default=100, help="Expected n_rms (default: 100)")
+    parser.add_argument("--rms-ymax", type=float, default=5.0, help="RMS plot Y max (deg/s)")
     args = parser.parse_args()
 
-    ser = serial.Serial(args.port, 115200, timeout=0.05)
-    print(f"✅ Connected to {args.port}")
+    ser = serial.Serial(args.port, args.baud, timeout=0.05)
+    print(f"✅ Connected to {args.port} @ {args.baud} baud")
 
-    # initial y-axis range for plots
+    # Initial axis range
     Y_LIMIT_RANGE = 60
 
-    # --- Setup plots (NOW 3 plots) ---
-    fig, (ax_roll, ax_rate, ax_rms) = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+    # ---- 3 plots: pitch, rate, rms (raw+filt) ----
+    fig, (ax_pitch, ax_rate, ax_rms) = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
     plt.subplots_adjust(left=0.1, right=0.75, top=0.92, bottom=0.1)
 
-    # IMU Roll plot -------------------------------------------
-    line_roll, = ax_roll.plot([], [], color="tab:orange", label="Roll [deg]")
-    ax_roll.set_title("IMU Roll Angle")
-    ax_roll.set_ylabel("Angle (deg)")
-    ax_roll.grid(True)
-    ax_roll.legend()
-    ax_roll.set_ylim(-Y_LIMIT_RANGE, Y_LIMIT_RANGE)
+    # Pitch plot
+    (line_pitch,) = ax_pitch.plot([], [], label="Pitch [deg]")
+    ax_pitch.set_title("IMU Pitch Angle")
+    ax_pitch.set_ylabel("deg")
+    ax_pitch.grid(True)
+    ax_pitch.legend()
+    ax_pitch.set_ylim(-Y_LIMIT_RANGE, Y_LIMIT_RANGE)
 
-    # IMU Roll Rate plot ---------------------------------------
-    line_rate, = ax_rate.plot([], [], color="tab:blue", label="Roll Rate [deg/s]")
-    ax_rate.set_title("IMU Roll Rate")
-    ax_rate.set_ylabel("Rate (deg/s)")
+    # Rate plot
+    (line_rate,) = ax_rate.plot([], [], label="Pitch Rate [deg/s]")
+    ax_rate.set_title("IMU Pitch Rate")
+    ax_rate.set_ylabel("deg/s")
     ax_rate.grid(True)
     ax_rate.legend()
     ax_rate.set_ylim(-Y_LIMIT_RANGE, Y_LIMIT_RANGE)
 
-    # RMS Plot --------------------------------------------------
-    line_rms, = ax_rms.plot([], [], color="tab:green", label="Rate RMS [deg/s]")
-    ax_rms.set_title("Rolling RMS (last 200 samples)")
-    ax_rms.set_xlabel("Time (ms)")
-    ax_rms.set_ylabel("RMS (deg/s)")
+    # RMS plot (deg/s): BOTH raw and filtered
+    (line_rms_raw,) = ax_rms.plot([], [], label="RMS Raw [deg/s]")
+    (line_rms_filt,) = ax_rms.plot([], [], label="RMS Filtered [deg/s]")
+    ax_rms.set_title("Pitch Rate RMS (Raw vs Filtered) (from Teensy)")
+    ax_rms.set_xlabel("Time (s)")
+    ax_rms.set_ylabel("deg/s")
     ax_rms.grid(True)
     ax_rms.legend()
-    ax_rms.set_ylim(0, 10)   # adjust as needed
+    ax_rms.set_ylim(0, args.rms_ymax)
 
-    # --- Run button ---
+    # ---- Run button ----
     axbutton = plt.axes([0.8, 0.85, 0.15, 0.08])
     button = Button(axbutton, "Run")
     button.on_clicked(lambda event: send_run_command(event, ser))
 
-    # --- Slider (0 → 360) ---
+    # ---- Y-range slider (for pitch & rate) ----
     ax_slider = plt.axes([0.8, 0.75, 0.15, 0.03])
     slider = Slider(ax_slider, "Y-Range", 0, 360, valinit=Y_LIMIT_RANGE)
 
-    def on_slider_change(val):
+    def on_slider_change(_val):
         r = slider.val
-        ax_roll.set_ylim(-r, r)
+        ax_pitch.set_ylim(-r, r)
         ax_rate.set_ylim(-r, r)
         fig.canvas.draw_idle()
 
     slider.on_changed(on_slider_change)
 
-    # --- Data buffers ---
-    t_vals, pitch_vals, rate_vals, rms_vals = [], [], [], []
-    max_points = 2000  # rolling window
+    # ---- Data buffers ----
+    t_vals = []
+    pitch_vals = []
+    rate_vals = []
+    rms_raw_vals = []
+    rms_filt_vals = []
 
-    def update(frame):
-        nonlocal t_vals, pitch_vals, rate_vals, rms_vals
+    max_points = int(args.max_points)
+    t0_us = None
 
-        # Read serial data
+    def try_parse_json_line(line: str):
+        """Return dict if valid JSON object, else None."""
+        line = line.strip()
+        if not line:
+            return None
+        if not line.startswith("{"):
+            return None
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
+    def update(_frame):
+        nonlocal t0_us, t_vals, pitch_vals, rate_vals, rms_raw_vals, rms_filt_vals
+
         while ser.in_waiting:
-            try:
-                line = ser.readline().decode("utf-8").strip()
-                if not line:
-                    continue
-                data = json.loads(line)
-
-                if all(k in data for k in ("t", "pitch", "pitch_rate")):
-                    t_ms = (data["t"] - (t_vals[0] if t_vals else data["t"])) / 1000.0
-                    t_vals.append(t_ms)
-                    pitch_vals.append(data["pitch"])
-                    rate_vals.append(data["pitch_rate"])
-
-                    # Compute rolling RMS (last 200 samples)
-                    if len(rate_vals) > 200:
-                        rms = compute_rms(rate_vals[-200:])
-                        rms_vals.append(rms)
-                    else:
-                        rms_vals.append(0.0)
-
-                    # Trim buffers
-                    if len(t_vals) > max_points:
-                        t_vals      = t_vals[-max_points:]
-                        pitch_vals   = pitch_vals[-max_points:]
-                        rate_vals   = rate_vals[-max_points:]
-                        rms_vals    = rms_vals[-max_points:]
-
-            except (UnicodeDecodeError, json.JSONDecodeError):
+            raw = ser.readline()
+            if not raw:
+                continue
+            line = raw.decode("utf-8", errors="ignore")
+            data = try_parse_json_line(line)
+            if data is None:
                 continue
 
-        # Update plots
+            required = ("t", "pitch", "rate", "rms_raw", "rms_filt", "n_rms", "valid")
+            if not all(k in data for k in required):
+                continue
+            if int(data["valid"]) != 1:
+                continue
+
+            t_us = int(data["t"])
+            if t0_us is None:
+                t0_us = t_us
+            t_s = (t_us - t0_us) * 1e-6
+
+            pitch_deg = float(data["pitch"])          # already deg
+            rate_deg_s = float(data["rate"])          # already deg/s
+            rms_raw_deg_s = float(data["rms_raw"]) * RAD2DEG
+            rms_filt_deg_s = float(data["rms_filt"]) * RAD2DEG
+            n_rms = int(data["n_rms"])
+
+            if args.expect_n and n_rms != int(args.expect_n):
+                print(f"⚠️ n_rms={n_rms} (expected ~{args.expect_n}) at t={t_s:.3f}s")
+
+            t_vals.append(t_s)
+            pitch_vals.append(pitch_deg)
+            rate_vals.append(rate_deg_s)
+            rms_raw_vals.append(rms_raw_deg_s)
+            rms_filt_vals.append(rms_filt_deg_s)
+
+            if len(t_vals) > max_points:
+                t_vals = t_vals[-max_points:]
+                pitch_vals = pitch_vals[-max_points:]
+                rate_vals = rate_vals[-max_points:]
+                rms_raw_vals = rms_raw_vals[-max_points:]
+                rms_filt_vals = rms_filt_vals[-max_points:]
+
         if t_vals:
-            line_roll.set_data(t_vals, pitch_vals)
+            line_pitch.set_data(t_vals, pitch_vals)
             line_rate.set_data(t_vals, rate_vals)
-            line_rms.set_data(t_vals, rms_vals)
+            line_rms_raw.set_data(t_vals, rms_raw_vals)
+            line_rms_filt.set_data(t_vals, rms_filt_vals)
 
-            xmin, xmax = min(t_vals), max(t_vals)
-            ax_roll.set_xlim(xmin, xmax)
-            ax_rate.set_xlim(xmin, xmax)
-            ax_rms.set_xlim(xmin, xmax)
+            ax_pitch.set_xlim(t_vals[0], t_vals[-1])
+            ax_rate.set_xlim(t_vals[0], t_vals[-1])
+            ax_rms.set_xlim(t_vals[0], t_vals[-1])
 
-        return (line_roll, line_rate, line_rms)
+        return (line_pitch, line_rate, line_rms_raw, line_rms_filt)
 
-    ani = animation.FuncAnimation(
-        fig, update, interval=100, blit=False, cache_frame_data=False
-    )
+    # Keep strong reference to avoid "Animation was deleted..." warning
+    anim = animation.FuncAnimation(fig, update, interval=100, blit=False, cache_frame_data=False)
+
     plt.show()
+
 
 if __name__ == "__main__":
     main()

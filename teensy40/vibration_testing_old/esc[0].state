@@ -1,0 +1,154 @@
+src/balance_TWR_mode.cpp:    if (!sup->esc[0].state.alive || !sup->esc[1].state.alive) {
+src/balance_TWR_mode.cpp:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/balance_TWR_mode.cpp:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/balance_TWR_mode.cpp:        sup->mode = SUP_MODE_IDLE;
+src/balance_TWR_mode.cpp:    float theta     = sup->imu.pitch_rad - THETA_EQ;
+src/balance_TWR_mode.cpp:    float theta_dot = sup->imu.pitch_rate;
+src/balance_TWR_mode.cpp:    float pos_L = sup->esc[0].state.pos_rad;
+src/balance_TWR_mode.cpp:    float pos_R = sup->esc[1].state.pos_rad;
+src/balance_TWR_mode.cpp:    float vel_L = sup->esc[0].state.vel_rad_s;
+src/balance_TWR_mode.cpp:    float vel_R = sup->esc[1].state.vel_rad_s;
+src/balance_TWR_mode.cpp:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/balance_TWR_mode.cpp:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/balance_TWR_mode.cpp:        sup->mode = SUP_MODE_IDLE;
+src/balance_TWR_mode.cpp:    msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/balance_TWR_mode.cpp:    msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/balance_TWR_mode.cpp:        float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
+src/balance_TWR_mode.cpp:        float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
+src/balance_TWR_mode.cpp:	  (sup->esc[0].state.pos_rad  * 90.0f / PI) - 24, 
+src/balance_TWR_mode.cpp:    if (elapsed > sup->user_total_us && false) {
+src/balance_TWR_mode.cpp:        sup->mode = SUP_MODE_IDLE;
+src/supervisor.cpp:static void rc_isr0() { uint8_t i=0; if(digitalReadFast(g_rc_pins[i])) g_rise_time[i]=micros(); else {g_sup->rc_raw[i].raw_us=micros()-g_rise_time[i]; g_sup->rc_raw[i].last_update=micros();}}
+src/supervisor.cpp:static void rc_isr1() { uint8_t i=1; if(digitalReadFast(g_rc_pins[i])) g_rise_time[i]=micros(); else {g_sup->rc_raw[i].raw_us=micros()-g_rise_time[i]; g_sup->rc_raw[i].last_update=micros();}}
+src/supervisor.cpp:static void rc_isr2() { uint8_t i=2; if(digitalReadFast(g_rc_pins[i])) g_rise_time[i]=micros(); else {g_sup->rc_raw[i].raw_us=micros()-g_rise_time[i]; g_sup->rc_raw[i].last_update=micros();}}
+src/supervisor.cpp:static void rc_isr3() { uint8_t i=3; if(digitalReadFast(g_rc_pins[i])) g_rise_time[i]=micros(); else {g_sup->rc_raw[i].raw_us=micros()-g_rise_time[i]; g_sup->rc_raw[i].last_update=micros();}}
+src/supervisor.cpp:  sup->esc_count = esc_count;
+src/supervisor.cpp:  for (uint16_t i = 0; i < sup->esc_count; ++i) {
+src/supervisor.cpp:    sup->esc[i] = ESC(nm, nid);
+src/supervisor.cpp:    sup->esc[i].init();
+src/supervisor.cpp:    sup->last_esc_heartbeat_us[i] = now;
+src/supervisor.cpp:      esc_lookup[nid] = &sup->esc[i];
+src/supervisor.cpp:  sup->imu.valid = false;
+src/supervisor.cpp:  sup->imu.roll_rad = sup->imu.pitch_rad = sup->imu.yaw_rad = 0.0f;
+src/supervisor.cpp:  sup->imu.last_update_us = now;
+src/supervisor.cpp:  sup->mode = SUP_MODE_IDLE;
+src/supervisor.cpp:  sup->gait_mode = GAIT_IDLE;
+src/supervisor.cpp:  sup->last_imu_update_us = now;
+src/supervisor.cpp:  sup->timing.last_tick_us = now;
+src/supervisor.cpp:  sup->timing.dt_us = 0;
+src/supervisor.cpp:  sup->timing.exec_time_us = 0;
+src/supervisor.cpp:  sup->last_health_ms = 0;
+src/supervisor.cpp:  sup->rc_count = rc_count;
+src/supervisor.cpp:  for (uint8_t i = 0; i < sup->rc_count; i++) {
+src/supervisor.cpp:    sup->rc_raw[i].raw_us = 0;
+src/supervisor.cpp:    sup->rc_raw[i].last_update = 0;
+src/supervisor.cpp:    sup->rc[i].norm = -1.0f;
+src/supervisor.cpp:    sup->rc[i].valid = false;
+src/supervisor.cpp:  for (uint8_t i = 0; i < sup->rc_count; i++) {
+src/supervisor.cpp:    uint32_t age = micros() - sup->rc_raw[i].last_update;
+src/supervisor.cpp:    if (age > RC_INPUT_TIMEOUT_US || sup->rc_raw[i].raw_us == 0) {
+src/supervisor.cpp:      sup->rc[i].norm  = -1.0f;
+src/supervisor.cpp:      sup->rc[i].raw_us = 0;
+src/supervisor.cpp:      sup->rc[i].valid = false;
+src/supervisor.cpp:    uint16_t pw = sup->rc_raw[i].raw_us;
+src/supervisor.cpp:    sup->rc[i].raw_us = pw;
+src/supervisor.cpp:    sup->rc[i].norm   = norm;
+src/supervisor.cpp:    sup->rc[i].valid  = true;
+src/supervisor.cpp:  sup->timing.min_dt_us = UINT32_MAX;
+src/supervisor.cpp:  sup->timing.max_dt_us = 0;
+src/supervisor.cpp:  sup->timing.sum_dt_us = 0;
+src/supervisor.cpp:  sup->timing.count = 0;
+src/supervisor.cpp:  sup->timing.overruns = 0;
+src/supervisor.cpp:  sup->serial1_stats.last_block_us = 0;
+src/supervisor.cpp:  sup->serial1_stats.max_block_us = 0;
+src/supervisor.cpp:  sup->serial1_stats.sum_block_us = 0;
+src/supervisor.cpp:  sup->serial1_stats.count = 0;
+src/supervisor.cpp:  sup->last_health_ms = 0; 
+src/supervisor.cpp:  sup->timing.dt_us = dt_us;
+src/supervisor.cpp:  sup->timing.exec_time_us = 0;
+src/supervisor.cpp:  sup->timing.last_tick_us = start_us;
+src/supervisor.cpp:  if (dt_us < sup->timing.min_dt_us) sup->timing.min_dt_us = dt_us;
+src/supervisor.cpp:  if (dt_us > sup->timing.max_dt_us) sup->timing.max_dt_us = dt_us;
+src/supervisor.cpp:  sup->timing.sum_dt_us += dt_us;
+src/supervisor.cpp:  sup->timing.count++;
+src/supervisor.cpp:    sup->timing.overruns++;
+src/supervisor.cpp:    float dt = (now_imu_us - sup->imu.last_update_us) * 1e-6f;
+src/supervisor.cpp:        (1.0f - rate_alpha) * sup->imu.pitch_rate;
+src/supervisor.cpp:    sup->imu.pitch_rad      = pitch_rad;
+src/supervisor.cpp:    sup->imu.pitch_rate     = pitch_rate;
+src/supervisor.cpp:    sup->imu.valid          = true;
+src/supervisor.cpp:    sup->imu.last_update_us = now_imu_us;
+src/supervisor.cpp:  switch (sup->mode) {
+src/supervisor.cpp:      msg1.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/supervisor.cpp:      msg2.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/supervisor.cpp:  sup->timing.exec_time_us = micros() - start_us;
+src/torque_reps.cpp:    float    pulse_torque = (sup->user_pulse_torque != 0.0f) ? sup->user_pulse_torque : DEFAULT_PULSE_TORQUE;
+src/torque_reps.cpp:    uint32_t pulse_us     = (sup->user_pulse_us   != 0)      ? sup->user_pulse_us     : DEFAULT_PULSE_US;
+src/torque_reps.cpp:    float torque_left  = sup->user_pulse_torque;
+src/torque_reps.cpp:    float torque_right = sup->user_pulse_torque;
+src/torque_reps.cpp:    msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/torque_reps.cpp:    msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/torque_reps.cpp:    float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
+src/torque_reps.cpp:    float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
+src/torque_reps.cpp:	      sup->esc[0].state.pos_rad,
+src/torque_reps.cpp:        sup->mode = SUP_MODE_IDLE;
+src/torque_reps.cpp~:    if (!sup->esc[0].state.alive || !sup->esc[1].state.alive) {
+src/torque_reps.cpp~:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/torque_reps.cpp~:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/torque_reps.cpp~:        sup->mode = SUP_MODE_IDLE;
+src/torque_reps.cpp~:    float theta     = sup->imu.pitch_rad - THETA_EQ;
+src/torque_reps.cpp~:    float theta_dot = sup->imu.pitch_rate;
+src/torque_reps.cpp~:    float pos_L = sup->esc[0].state.pos_rad;
+src/torque_reps.cpp~:    float pos_R = sup->esc[1].state.pos_rad;
+src/torque_reps.cpp~:    float vel_L = sup->esc[0].state.vel_rad_s;
+src/torque_reps.cpp~:    float vel_R = sup->esc[1].state.vel_rad_s;
+src/torque_reps.cpp~:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/torque_reps.cpp~:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/torque_reps.cpp~:        sup->mode = SUP_MODE_IDLE;
+src/torque_reps.cpp~:    msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/torque_reps.cpp~:    msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/torque_reps.cpp~:    float enc = sup->imu.pitch_rad;
+src/torque_reps.cpp~:        float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
+src/torque_reps.cpp~:        float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
+src/torque_reps.cpp~:    if (elapsed > sup->user_total_us && false) {
+src/torque_reps.cpp~:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp:    if (!sup->esc[0].state.alive || !sup->esc[1].state.alive) {
+src/verify_angle.cpp:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp:    float theta     = sup->imu.pitch_rad - THETA_EQ;
+src/verify_angle.cpp:    float theta_dot = sup->imu.pitch_rate;
+src/verify_angle.cpp:    float pos_L = sup->esc[0].state.pos_rad;
+src/verify_angle.cpp:    float pos_R = sup->esc[1].state.pos_rad;
+src/verify_angle.cpp:    float vel_L = sup->esc[0].state.vel_rad_s;
+src/verify_angle.cpp:    float vel_R = sup->esc[1].state.vel_rad_s;
+src/verify_angle.cpp:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp:    msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp:    msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp:    float enc = sup->imu.pitch_rad;
+src/verify_angle.cpp:        float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
+src/verify_angle.cpp:        float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
+src/verify_angle.cpp:    if (elapsed > sup->user_total_us && false) {
+src/verify_angle.cpp:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp~:    if (!sup->esc[0].state.alive || !sup->esc[1].state.alive) {
+src/verify_angle.cpp~:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp~:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp~:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp~:    float theta     = sup->imu.pitch_rad - THETA_EQ;
+src/verify_angle.cpp~:    float theta_dot = sup->imu.pitch_rate;
+src/verify_angle.cpp~:    float pos_L = sup->esc[0].state.pos_rad;
+src/verify_angle.cpp~:    float pos_R = sup->esc[1].state.pos_rad;
+src/verify_angle.cpp~:    float vel_L = sup->esc[0].state.vel_rad_s;
+src/verify_angle.cpp~:    float vel_R = sup->esc[1].state.vel_rad_s;
+src/verify_angle.cpp~:        msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp~:        msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp~:        sup->mode = SUP_MODE_IDLE;
+src/verify_angle.cpp~:    msgL.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[0].config.node_id);
+src/verify_angle.cpp~:    msgR.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[1].config.node_id);
+src/verify_angle.cpp~:        float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
+src/verify_angle.cpp~:        float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
+src/verify_angle.cpp~:	  (sup->esc[0].state.pos_rad  * 90.0f / PI) - 24, 
+src/verify_angle.cpp~:    if (elapsed > sup->user_total_us && false) {
+src/verify_angle.cpp~:        sup->mode = SUP_MODE_IDLE;

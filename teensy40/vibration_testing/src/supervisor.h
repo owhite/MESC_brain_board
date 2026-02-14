@@ -8,8 +8,7 @@
 #include "CAN_helper.h"
 #include "main.h"
 
-#define TELEMETRY_DECIMATE 20
-#define SERIAL_DECIMATE    100
+#define TELEMETRY_DECIMATE 100
 
 #define SUPERVISOR_MAX_ESCS   4
 #define RC_INPUT_MAX_PINS     8
@@ -20,14 +19,12 @@
 #define CONTROL_LOOP_PRIORITY 16
 #define CONTROL_PERIOD_US     1000   // 1 kHz
 
-extern volatile bool test_pin_state; 
-
 // ---------------- Defaults ----------------
-const uint32_t DEFAULT_PULSE_US     = 0;
-const uint32_t DEFAULT_TOTAL_US     = 0;
-const float    DEFAULT_KD_TERM = 0.0f;
-const float    DEFAULT_KP_TERM = 0.0f;
-const float    DEFAULT_PULSE_TORQUE = 0.0f;
+static constexpr uint32_t DEFAULT_PULSE_US     = 0;
+static constexpr uint32_t DEFAULT_TOTAL_US     = 0;
+static constexpr float    DEFAULT_KD_TERM = 0.0f;
+static constexpr float    DEFAULT_KP_TERM = 0.0f;
+static constexpr float    DEFAULT_PULSE_TORQUE = 0.0f;
 
 // ---------------- Loop Timing Stats ----------------
 // Captures jitter and execution time statistics of the control loop.
@@ -79,6 +76,7 @@ struct IMU_typedef {
   float roll_rate;        // rad/s
   float pitch_rate;
   float pitch_bias;
+  float pitch_rate_raw;
 
   uint32_t last_update_us;
 };
@@ -91,8 +89,6 @@ enum SupervisorMode {
   SUP_MODE_SINUSOIDAL,
   SUP_MODE_TORQUE_RESPONSE,
   SUP_MODE_BALANCE_TWR,
-  SUP_VERIFY_ANGLE,
-  SUP_TORQUE_REPS,
   SUP_MODE_SET_POSITION,
   SUP_MODE_SIN_TORQUE,
   SUP_MODE_FAULT       // Fault state (error, timeout, etc.)

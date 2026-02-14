@@ -5,16 +5,10 @@
 void balance_TWR_mode(Supervisor_typedef *sup,
 		      FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can);
 
-void verify_angle(Supervisor_typedef *sup, FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can);
-
-void torque_reps(Supervisor_typedef *sup, FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can);
-
 // ---------------- Global Flags ----------------
 // These are set by the control ISR to signal the main loop.
 volatile bool g_control_due = false;
 volatile uint32_t g_control_now_us = 0;
-
-volatile bool test_pin_state = true;
 
 // Note there are multiple ISRs, some for the controlLoop(),
 // and some for RC transmitter input capture.
@@ -51,14 +45,14 @@ float angle_diff(float target, float actual) {
   return diff - M_PI;
 }
 
-volatile uint32_t imu_drdy_count = 0;
-void setImuFlag() { imu_drdy_count++; }
+volatile bool dataReady = false;
+void setImuFlag() { dataReady = true; }
 
 // ---------------- Supervisor Initialization ----------------
 // Sets up ESCs, IMU, RC inputs, and resets timing/telemetry stats.
 // Called once at startup from main().
 void init_supervisor(Supervisor_typedef *sup,
-		     ICM42688 &imu,
+                     ICM42688 &imu,
                      uint16_t esc_count,
                      const char *esc_names[],
                      const uint16_t node_ids[],
@@ -70,12 +64,12 @@ void init_supervisor(Supervisor_typedef *sup,
 
   *sup = Supervisor_typedef{};
 
-  // Clear ESC lookup table
+  // ---- Clear ESC lookup table ----
   for (uint16_t i = 0; i < ESC_LOOKUP_SIZE; ++i) {
     esc_lookup[i] = nullptr;
   }
 
-  // ESC setup and registration
+  // ---- ESC setup ----
   if (esc_count > SUPERVISOR_MAX_ESCS) esc_count = SUPERVISOR_MAX_ESCS;
   sup->esc_count = esc_count;
 
@@ -84,41 +78,70 @@ void init_supervisor(Supervisor_typedef *sup,
   for (uint16_t i = 0; i < sup->esc_count; ++i) {
     const char *nm = (esc_names && esc_names[i]) ? esc_names[i] : "";
     uint16_t nid   = (node_ids) ? node_ids[i] : 0;
+
     sup->esc[i] = ESC(nm, nid);
     sup->esc[i].init();
     sup->last_esc_heartbeat_us[i] = now;
+
     if (nid < ESC_LOOKUP_SIZE) {
       esc_lookup[nid] = &sup->esc[i];
     }
   }
 
-  // set supervisor's IMU initial state
-  //   does not touch the chip at this point
+  // ---- IMU bring-up (matches your proven template) ----
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+  pinMode(INT_PIN, INPUT);
+
+  SPI.begin();
+
+  int ret = imu.begin();
+  if (ret < 0) {
+    Serial.print("imu.begin() failed: ");
+    Serial.println(ret);
+    while (1) delay(1000);
+  }
+
+  ret = imu.setAccelODR(ICM42688::odr2k);
+  if (ret < 0) {
+    Serial.print("setAccelODR() failed: ");
+    Serial.println(ret);
+    while (1) delay(1000);
+  }
+
+  ret = imu.setGyroODR(ICM42688::odr2k);
+  if (ret < 0) {
+    Serial.print("setGyroODR() failed: ");
+    Serial.println(ret);
+    while (1) delay(1000);
+  }
+
+  ret = imu.enableDataReadyInterrupt();
+  if (ret < 0) {
+    Serial.print("enableDataReadyInterrupt() failed: ");
+    Serial.println(ret);
+    while (1) delay(1000);
+  }
+
+  // Clear any pending DRDY latch (same as your working example)
+  imu.getRawAGT();
+  dataReady = false;
+
+  attachInterrupt(digitalPinToInterrupt(INT_PIN), setImuFlag, RISING);
+
+  // ---- Supervisor IMU initial state ----
   sup->imu.valid = false;
-  sup->imu.roll_rad = sup->imu.pitch_rad = sup->imu.yaw_rad = 0.0f;
+  sup->imu.roll_rad = 0.0f;
+  sup->imu.pitch_rad = 0.0f;
+  sup->imu.yaw_rad = 0.0f;
+  sup->imu.pitch_rate_raw = 0.0f;
   sup->imu.last_update_us = now;
 
-  // Supervisor state machine initial mode
   sup->mode = SUP_MODE_IDLE;
   sup->gait_mode = GAIT_IDLE;
   sup->last_imu_update_us = now;
 
-  // ---- IMU Setup ----
-  int status = imu.begin();
-  if (status < 0) {
-    Serial.println("IMU initialization unsuccessful");
-    Serial.println(status);
-    while (1) {}
-  }
-
-  // attaching the interrupt to micro controller pin INT_PIN
-  pinMode(INT_PIN, INPUT);
-  attachInterrupt(INT_PIN, setImuFlag, RISING);
-  imu.setAccelODR(ICM42688::odr1k);
-  imu.setGyroODR(ICM42688::odr1k);
-  imu.enableDataReadyInterrupt();
-
-  // Timing stats initialization
+  // ---- Timing stats ----
   sup->timing.last_tick_us = now;
   sup->timing.dt_us = 0;
   sup->timing.exec_time_us = 0;
@@ -126,22 +149,25 @@ void init_supervisor(Supervisor_typedef *sup,
 
   sup->last_health_ms = 0;
 
-  // RC input setup: attach interrupts to each pin
+  // ---- RC setup ----
   if (rc_count > RC_INPUT_MAX_PINS) rc_count = RC_INPUT_MAX_PINS;
   sup->rc_count = rc_count;
+
   for (uint8_t i = 0; i < sup->rc_count; i++) {
     g_rc_pins[i] = rc_pins[i];
     pinMode(g_rc_pins[i], INPUT);
+
     sup->rc_raw[i].raw_us = 0;
     sup->rc_raw[i].last_update = 0;
     sup->rc[i].norm = -1.0f;
     sup->rc[i].valid = false;
+
     attachInterrupt(digitalPinToInterrupt(g_rc_pins[i]), rc_isrs[i], CHANGE);
   }
 
-  // Telemetry stats initialization
   resetTelemetryStats(sup);
 }
+
 
 // ---------------- RC Normalization ----------------
 // Converts raw RC input pulse widths into normalized values
@@ -172,6 +198,11 @@ void updateRC(Supervisor_typedef *sup) {
   }
 }
 
+// Compatibility wrapper if your header still declares updateSupervisorRC()
+void updateSupervisorRC(Supervisor_typedef *sup) {
+  updateRC(sup);
+}
+
 // ---------------- Reset Timing Stats ----------------
 // Clears loop timing stats so the next window of data
 // can be collected cleanly.
@@ -192,8 +223,6 @@ static float integralFBx = 0.0f, integralFBy = 0.0f, integralFBz = 0.0f;
 static const float twoKp = 2.0f * 0.5f;  // Kp = 0.5
 static const float twoKi = 2.0f * 0.1f;  // Ki = 0.1
 
-bool accelValid = false;
-
 static void mahonyUpdateIMU(float gx, float gy, float gz,
                             float ax, float ay, float az,
                             float dt) {
@@ -202,7 +231,7 @@ static void mahonyUpdateIMU(float gx, float gy, float gz,
   // -----------------------------------------------------------
   float accMag = sqrtf(ax*ax + ay*ay + az*az);
 
-  accelValid = false;
+  bool accelValid = false;
 
   if (accMag > 1e-6f) {
     float recip = 1.0f / accMag;
@@ -210,10 +239,9 @@ static void mahonyUpdateIMU(float gx, float gy, float gz,
     ay *= recip;
     az *= recip;
 
-    if (accMag > 0.85f && accMag < 1.15f) {
+    // accel gating: ignore accel when far from 1g
+    if (fabsf(accMag - 1.0f) < 0.25f) {
       accelValid = true;
-    } else {
-      accelValid = false;
     }
   }
 
@@ -222,7 +250,6 @@ static void mahonyUpdateIMU(float gx, float gy, float gz,
   // -----------------------------------------------------------
   float ex = 0.0f, ey = 0.0f, ez = 0.0f;
 
-  // only perform filter if vibration levels are down to a dull roar
   if (accelValid) {
     // Estimated gravity direction from quaternion
     float vx = 2.0f * (q1*q3 - q0*q2);
@@ -295,17 +322,9 @@ void resetTelemetryStats(Supervisor_typedef *sup) {
   sup->last_health_ms = 0; 
 }
 
-// ---------------- Main Control Loop ----------------
-// This function is called deterministically by the ISR.
-// Strategy to preserve determinism:
-//   - Do CAN bus draining and RC input updates outside
-//     of this function.
-//   - Inside here, only handle time-critical tasks:
-//       * Poll IMU via I²C and update orientation
-//       * Update timing statistics (jitter, overruns)
-//       * Run balance control law (TODO)
-//
 
+
+// ---------------- Main Control Loop ----------------
 static float ax_min = 999.0f, ax_max = -999.0f;
 static float gx_min = 999.0f, gx_max = -999.0f;
 static int dbg_counter = 0;
@@ -327,7 +346,6 @@ void controlLoop(ICM42688 &imu, Supervisor_typedef *sup,
   last_us = start_us;
 
   sup->timing.dt_us = dt_us;
-  sup->timing.exec_time_us = 0;
   sup->timing.last_tick_us = start_us;
 
   if (dt_us < sup->timing.min_dt_us) sup->timing.min_dt_us = dt_us;
@@ -338,88 +356,67 @@ void controlLoop(ICM42688 &imu, Supervisor_typedef *sup,
   if (dt_us > CONTROL_PERIOD_US + 100){
     sup->timing.overruns++;
   }
+
   // ---- IMU: read & update orientation / pitch using Mahony ----
+  if (dataReady) {
+    dataReady = false;
 
-  static uint32_t last_imu_count = 0;
-  uint32_t now_count = imu_drdy_count;
+    // (1) Read return value from getAGT()
+    int imu_ret = imu.getAGT();
+    if (imu_ret < 0) {
+      // Mark invalid and skip this update (do not use stale values)
+      sup->imu.valid = false;
+      // Still update timestamp bookkeeping so dt doesn't blow up forever
+      sup->imu.last_update_us = micros();
+    } else {
+      uint32_t now_imu_us = micros();
 
-  if (now_count != last_imu_count) {
-    last_imu_count = now_count;
+      // --- Raw accelerometer (assumed in "g" units) ---
+      float ax = imu.accX();
+      float ay = imu.accY();
+      float az = imu.accZ();
 
-    imu.getAGT();
+      // --- Raw gyro (deg/s) ---
+      float gx_dps = imu.gyrX();
+      float gy_dps = imu.gyrY();
+      float gz_dps = imu.gyrZ();
 
-    uint32_t now_imu_us = micros();
+      // Convert gyro to rad/s for Mahony
+      float gx = gx_dps * DEG_TO_RAD;
+      float gy = gy_dps * DEG_TO_RAD;
+      float gz = gz_dps * DEG_TO_RAD;
 
-    // --- Raw accelerometer (assumed in "g" units) ---
-    float ax = imu.accX();
-    float ay = imu.accY();
-    float az = imu.accZ();
+      // --- Compute dt since last update ---
+      float dt = (now_imu_us - sup->imu.last_update_us) * 1e-6f;
+      if (dt < 0.0005f || dt > 0.005f) {
+        dt = CONTROL_PERIOD_US * 1e-6f;  // fallback ~1 ms
+      }
 
-    float a_mag = sqrtf(ax*ax + ay*ay + az*az);
+      // --- Run full 3D Mahony update ---
+      mahonyUpdateIMU(gx, gy, gz, ax, ay, az, dt);
 
-    // --- Raw gyro (deg/s) ---
-    float gx_dps = imu.gyrX();
-    float gy_dps = imu.gyrY();
-    float gz_dps = imu.gyrZ();
+      // --- Extract pitch from quaternion ---
+      float pitch_rad = asinf(2.0f * (q0*q2 - q3*q1));
 
-    // Convert gyro to rad/s for Mahony
-    float gx = gx_dps * DEG_TO_RAD;
-    float gy = gy_dps * DEG_TO_RAD;
-    float gz = gz_dps * DEG_TO_RAD;
+      // --- Approximate pitch rate from gyro (pick correct axis!) ---
+      float pitch_rate_raw = gx;   // rad/s
 
-    // --- Compute dt since last update ---
-    float dt = (now_imu_us - sup->imu.last_update_us) * 1e-6f;
-    if (dt < 0.0005f || dt > 0.005f) {
-      dt = CONTROL_PERIOD_US * 1e-6f;  // fallback ~1 ms
+      // store raw into the struct:
+      sup->imu.pitch_rate_raw = pitch_rate_raw;
+
+      const float rate_alpha = 0.03f; // LPF against vibration
+      float pitch_rate =
+          rate_alpha * pitch_rate_raw +
+          (1.0f - rate_alpha) * sup->imu.pitch_rate;
+
+      // --- Store into supervisor IMU struct ---
+      sup->imu.pitch_rad      = pitch_rad;
+      sup->imu.pitch_rate     = pitch_rate;
+      sup->imu.valid          = true;
+      sup->imu.last_update_us = now_imu_us;
+
     }
-
-    // --- Run full 3D Mahony update ---
-    mahonyUpdateIMU(gx, gy, gz, ax, ay, az, dt);
-
-    // --- Extract pitch from quaternion ---
-    // Using standard aerospace convention:
-    // roll  = atan2(2(q0q1 + q2q3), 1 - 2(q1^2 + q2^2))
-    // pitch =  asin(2(q0q2 - q3q1))
-    // yaw   = atan2(2(q0q3 + q1q2), 1 - 2(q2^2 + q3^2))
-    float pitch_rad = asinf(2.0f * (q0*q2 - q3*q1));
-
-    // --- Approximate pitch rate from gyro (pick correct axis!) ---
-    // If your pitch axis is better aligned with gy, swap to gy.
-    float pitch_rate_raw = gy;   // rad/s
-
-    const float rate_alpha = 0.03f; // LPF against vibration
-    float pitch_rate =
-        rate_alpha * pitch_rate_raw +
-        (1.0f - rate_alpha) * sup->imu.pitch_rate;
-
-    // --- Store into supervisor IMU struct ---
-    sup->imu.pitch_rad      = pitch_rad;
-    sup->imu.pitch_rate     = pitch_rate;
-    sup->imu.valid          = true;
-    sup->imu.last_update_us = now_imu_us;
-    /*
-    use with:
-    ./plot_amag.py -p /dev/cu.usbmodem178888901
-
-    Serial.printf(
-		  "{\"t\":%lu,"
-		  "\"a_mag\":%.3f,"
-		  "\"accelValid\":%d,"
-		  "\"pitch_rad\":%.3f,"
-		  "\"pitch_rate_raw\":%.3f,"
-		  "\"pitch_rate_filt\":%.3f}\r\n",
-		  micros(),
-		  a_mag,
-		  accelValid ? 1 : 0,
-		  pitch_rad * 180.0f / PI,
-		  pitch_rate_raw * 180.0f / PI,
-		  pitch_rate * 180.0f / PI
-		  );
-
-    */
-
   }
-
 
   // ---- Update RC PWM input ----
   updateRC(sup);
@@ -455,16 +452,6 @@ void controlLoop(ICM42688 &imu, Supervisor_typedef *sup,
  
   case SUP_MODE_BALANCE_TWR: {
     balance_TWR_mode(sup, can);
-    break;
-  }
-
-  case SUP_VERIFY_ANGLE: {
-    verify_angle(sup, can);
-    break;
-  }
-
-  case SUP_TORQUE_REPS: {
-    torque_reps(sup, can);
     break;
   }
 

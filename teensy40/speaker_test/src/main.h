@@ -8,7 +8,7 @@
 // ================= Pins from your board =================
 #define LED1_PIN        2
 #define LED2_PIN        3
-#define PUSHBUTTON_PIN  17
+#define PUSHBUTTON_PIN  19
 #define SPEAKER_PIN     14
 
 // ================= RC PWM (4 channels) =================

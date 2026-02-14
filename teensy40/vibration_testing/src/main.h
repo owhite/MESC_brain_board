@@ -22,11 +22,7 @@
 #define PUSHBUTTON_PIN  19
 #define SPEAKER_PIN     14
 #define CS_PIN          10
-#define INT_PIN         19
-#define TEST_PIN        14
-
-#define IMU_SPI_HS_CLOCK 10000000
-
+#define INT_PIN         20
 
 // ================= RC PWM (4 channels) =================
 #define RC_INPUT1       9
