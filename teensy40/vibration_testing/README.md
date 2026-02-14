@@ -7,6 +7,18 @@ A balancing robot is fundamentally a noise-sensitive inverted pendulum. If tilt 
 - Amplify high-frequency vibration
 - Cycle into failure mode
 
+## System summary
+- Platform: Teensy 4.0
+- IMU: ICM42688 (operates on SPI, uses DRDY interrupt)
+- Mahony 6DOF filter
+- Pitch extracted from quaternion
+- Pitch rate derived from gyro (gx) and low-pass filtered
+- Important loop: controlLoop() at CONTROL_PERIOD_US in SUP_MODE_BALANCE_TWR
+- Telemetry is via Serial.printf() JSON, live plotted w/ matplotlib
+- A longer description of the firmware [is here](IMU_firmware_summary.md))
+
+## Code strategy
+
 ## Previous work
 - See [this entry](../../DOCS/nov16_IMU.md) on using a Mahony filter to improve readings from the ICM42688. The filter automatically rejects vibration-induced accelerometer noise and uses gyro bias correction to keep the angle accurate over time. 
 - Code used for SPI communications with the ICM42688 was slightly modified from [here](https://github.com/finani/ICM42688.git) and the Mahony filter in [supervisor.cpp](src/supervisor.cpp) in `mahonyUpdateIMU()`. 
@@ -23,9 +35,8 @@ A balancing robot is fundamentally a noise-sensitive inverted pendulum. If tilt 
 - Live plotting
 
 ## IMU noise
-During the process comparing the IMU with the mechanical angle of the wheel encoders I tested this
+During the process comparing the IMU with the mechanical angle of the wheel encoders I put this in the code:
 
-I put this in the code:
 ```
     float a_mag = sqrtf(ax*ax + ay*ay + az*az);
     Serial.printf("a_mag=%.5f\r\n", a_mag);
@@ -50,7 +61,7 @@ a_mag=2.59398
 
 That is a **horrendous** level of noise. 
 
-To follow the status of vibration reduction:
+So it's time to follow the status of vibration reduction:
 - `./plot_amag.py -p /dev/cu.usbmodem178888901`
 - `./IMU_test.py -p /dev/cu.usbmodem178888901` 
 
@@ -121,7 +132,36 @@ struct RunningStats {
 };
 ```
 
-Not a filter but basically serves as a noise metric that measures the standard deviation of the pitch rate over the window since last reset. Let's have a look at a plot where we have put all these mitigating factors in place and the run one of the motors. The plot shows the RMS of filtered versus unfiltered data during that run. What is gratifying is there is an initial spike in the fitered angle measurement that settles down very quickly even when the motor is running. 
+This serves as a noise metric that measures the standard deviation of the pitch rate over the window since last reset.  
+
+**Plotting**
+```c 
+Serial.printf(
+  "{\"t\":%lu,"
+  "\"pitch\":%.3f,"
+  "\"rate\":%.3f,"
+  "\"rate_rms\":%.6f,"
+  "\"n_rms\":%lu,"
+  "\"age_us\":%lu,"
+  "\"valid\":%d,"
+  "\"exec_us\":%lu,"
+  "\"ovr\":%lu}\r\n",
+  micros(),
+  sup->imu.pitch_rad * 180.0f / PI,
+  sup->imu.pitch_rate * 180.0f / PI,
+  pitch_rate_rms.stddev(),
+  (unsigned long)pitch_rate_rms.n,
+  age_us,
+  sup->imu.valid ? 1 : 0,
+  sup->timing.exec_time_us,
+  sup->timing.overruns
+);
+```
+
+Which exports:
+```{"t":29580759,"pitch":-1.813,"rate":-0.011,"age_us":3,"valid":1,"exec_us":21,"ovr":0}```
+
+For example let's have a look at a plot where we have put all these mitigating factors in place and the run one of the motors. The plot shows the RMS of filtered versus unfiltered data during that run. What is gratifying is there is an initial spike in the fitered angle measurement that settles down very quickly even when the motor is running. 
 
 <img src="noise1.png" alt="Plot result" width="400"/>
 
@@ -153,4 +193,4 @@ Not a filter but basically serves as a noise metric that measures the standard d
 
 This is excellent performance.
 
-This work was done at this commit: hash id: `710adf8410c4b96196679a0d5872bc51026f0013`
+The work here was done at this commit: hash id: `710adf8410c4b96196679a0d5872bc51026f0013`
