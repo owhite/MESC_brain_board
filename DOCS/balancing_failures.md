@@ -1,66 +1,73 @@
 # Failure Modes & Watchdogs Checklist
 
-This document lists common issues that can break balancing in the brain board project, along with what to watch for and how to mitigate them.
+Common issues that can break balancing in the brain board project, along with what to watch for and how to mitigate them.
 
 ---
 
-## 1. Model–Reality Gaps
+## Model–Reality Gaps
 - **Cause:** Wrong mass, inertia, COM height, motor constants, friction, or linearization errors.
 - **Watch:** Compare predicted vs measured response, recovery time, deviations from simulation.
 - **Mitigation:** Log commanded vs actual response, refine A/B matrices via system identification.
 
 ---
 
-## 2. Sensor Problems
-- **Cause:** Gyro bias drift, accelerometer noise, encoder quantization.
+## IMU Problems
+- **Cause:** Gyro bias drift, accelerometer noise
 - **Watch:** Sudden jumps in angle/velocity, gyro bias while stationary, encoder inconsistency.
-- **Mitigation:** Log variance/residuals, calibrate IMU, add filtering (complementary/Kalman), use watchdogs for out-of-range values.
+- **Mitigation:** Log vibration, [calibrate IMU](../teensy40/vibration_testing/README.md), add filtering (complementary/Kalman)
 
 ---
 
-## 3. Actuator Saturation
+## ESC Problems
+- **Cause:** Bad current limits, encoder measurement, motor settings.
+- **Watch:** Motors behave poorly, assymetric motor behavior
+- **Mitigation:** Log movement, test CAN commands, set out-of-range values, check torques, calibrate encoder offsets
+
+---
+
+## Actuator Saturation
 - **Cause:** Motors can’t provide commanded torque at high tilt or disturbance.
 - **Watch:** Torque command clipping at ±max, battery sag under load.
 - **Mitigation:** Log % time saturated, trigger warnings, penalize torque in LQR (larger R), add anti-windup logic.
 
 ---
 
-## 4. Timing Jitter & Delays
+## Timing Jitter & Delays
 - **Cause:** Control loop not running exactly at 500 Hz due to blocking I/O or CAN bursts.
 - **Watch:** Control loop dt distribution, flag dt > 3–4 ms.
 - **Mitigation:** Keep control loop deterministic, throttle telemetry, measure jitter with GPIO/DWT, abort if timing drift exceeds threshold.
 
 ---
 
-## 5. Communication Latency / Loss
+## Communication Latency / Loss
 - **Cause:** CAN congestion, delayed encoder updates, ESP32 UART backpressure.
 - **Watch:** Gaps in encoder/velocity updates, node alive status toggling.
 - **Mitigation:** Add timeout counters, log packet inter-arrival times, fail safe to idle if CAN stalls.
 
 ---
 
-## 6. Estimator Errors
+## Estimator Errors
 - **Cause:** State estimator provides wrong tilt/velocity due to noise or drift.
 - **Watch:** Innovation/residuals (measurement − prediction), divergence in estimated vs measured tilt.
 - **Mitigation:** Log innovations, abort if residuals exceed threshold.
 
 ---
 
-## 7. Startup Conditions
+## Startup Conditions
 - **Cause:** Robot starts too tilted (>15°) for linearization to hold.
 - **Watch:** Initial tilt angle when enabling balance mode.
 - **Mitigation:** Require tilt < 5° before enabling control, otherwise refuse to engage.
 
 ---
 
-## 8. Asymmetry & Cross-Coupling
+## Asymmetry & Cross-Coupling
 - **Cause:** Left/right motors behave differently, leading to yaw drift.
 - **Watch:** Persistent yaw when balancing in place.
 - **Mitigation:** Calibrate wheel gains, extend state model to include yaw if necessary.
 
 ---
 
-## 9. Physical Robot Issues
+## Physical Robot Issues
 - **Frame Flexibility / Looseness**  
   - **Cause:** Weak materials, loose bolts, frame compliance.  
   - **Watch:** Buzzing or oscillation not predicted by model.  
@@ -89,7 +96,7 @@ This document lists common issues that can break balancing in the brain board pr
 - **Structural Resonances**  
   - **Cause:** Flexible members vibrating.  
   - **Watch:** High-frequency IMU oscillations.  
-  - **Mitigation:** Stiffen frame, add damping.
+  - **Mitigation:** Stiffen frame, add damping. See [this discussion](../teensy40/vibration_testing/README.md)
 
 - **Loose Encoders / Misalignment**  
   - **Cause:** Poor encoder mount.  

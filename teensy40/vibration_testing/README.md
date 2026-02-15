@@ -15,16 +15,15 @@ A balancing robot is fundamentally a noise-sensitive inverted pendulum. If tilt 
 - Pitch rate derived from gyro (gx) and low-pass filtered
 - Important loop: controlLoop() at CONTROL_PERIOD_US in SUP_MODE_BALANCE_TWR
 - Telemetry is via Serial.printf() JSON, live plotted w/ matplotlib
-- A longer description of the firmware [is here](IMU_firmware_summary.md))
-
-## Code strategy
+- A longer description of the firmware [is here](IMU_firmware_summary.md)
 
 ## Previous work
 - See [this entry](../../DOCS/nov16_IMU.md) on using a Mahony filter to improve readings from the ICM42688. The filter automatically rejects vibration-induced accelerometer noise and uses gyro bias correction to keep the angle accurate over time. 
 - Code used for SPI communications with the ICM42688 was slightly modified from [here](https://github.com/finani/ICM42688.git) and the Mahony filter in [supervisor.cpp](src/supervisor.cpp) in `mahonyUpdateIMU()`. 
 - Also have a look at `controlLoop()` in [balance_TWR_mode.cpp](src/balance_TWR_mode.cpp)
 
-## Things to test:
+## Be smart
+Before trying to get the bot balance, test how vibration impacts your IMU. Things to test:
 - Quantify the noise the motor injects into the IMU
 - Mechanical isolation (moongel!)
 - Location / mounting of IMU that impact vibration
@@ -35,7 +34,7 @@ A balancing robot is fundamentally a noise-sensitive inverted pendulum. If tilt 
 - Live plotting
 
 ## IMU noise
-During the process comparing the IMU with the mechanical angle of the wheel encoders I put this in the code:
+Firmware is your friend, print out your results over serial:
 
 ```
     float a_mag = sqrtf(ax*ax + ay*ay + az*az);
@@ -95,7 +94,7 @@ Applies a Mahony filter which fuses acceleration and gyro values from the IMU.
 
 
 ```
-      const float rate_alpha = 0.03f; // LPF against vibration
+      const float rate_alpha = 0.03f; // Low Pass Filter against vibration
       float pitch_rate =
           rate_alpha * pitch_rate_raw +
           (1.0f - rate_alpha) * sup->imu.pitch_rate;
@@ -158,6 +157,9 @@ Serial.printf(
 );
 ```
 
+**NOTE** The user sets enters into measuring state through pressing the button or external python plotting program, the program enters into that control flow by setting `supervisor.mode = SUP_MODE_BALANCE_TWR`
+
+
 Which exports:
 ```{"t":29580759,"pitch":-1.813,"rate":-0.011,"age_us":3,"valid":1,"exec_us":21,"ovr":0}```
 
@@ -185,12 +187,14 @@ For example let's have a look at a plot where we have put all these mitigating f
 | IMU data ready interrupt | Working         |
 | Mahony filter            | Working         |
 | Pitch extraction         | Working         |
-| Pitch rate LPF           | Working         |
+| Pitch rate low pass filt | Working         |
 | Running RMS              | Working         |
 | Control loop timing      | Stable (~21 µs) |
 | Overruns                 | None            |
 | Telemetry decimation     | Working         |
 
 This is excellent performance.
+
+------------------------------------------------------------------------
 
 The work here was done at this commit: hash id: `710adf8410c4b96196679a0d5872bc51026f0013`

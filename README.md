@@ -69,9 +69,10 @@ Why? Well:
 - What's most important to use this project as a prompt for making your own system
 - Tuning is the real work — not a flaw, but part of the fun
 - What really makes a robot stand is eliminating all the problems like jitter, timing issues, CAN communications, and modeling
-- The code, and any intellectual ideas found here should remain in the public domain
 
 **Finally, dearest reader**... I care about you, youre adorable, but quite unfortunately one of the ESCs that I use is closed source. Nothing would delight me more to make it open and I will try. Also note that for a while, I was using the Flipsky Mini FSESC6.7 pro 70A but I got tired of blowing them up because of cheap parts. Maybe some day I will make a version that runs on [moteus](https://mjbots.com/products/moteus-r4-11) or [odrive](https://odriverobotics.com) but right now that is not a priority. 
+
+For these reasons and others you cant expect to use this repo to build a TWR like it a kit.
 
 ## The really great news is there is a new source of help. 
 

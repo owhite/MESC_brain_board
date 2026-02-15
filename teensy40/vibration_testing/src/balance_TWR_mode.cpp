@@ -76,7 +76,55 @@ static RunningStats rate_rms_raw;
 static RunningStats rate_rms_filt;
 static int rms_counter = 0;
 
+/* 
+POTENTIAL ISSUES:
+
+*) SEE ALSO: system_assumptions.md
+
+*) Using filtered velocity for x_dot but unwrapped angle for x_wheel
+That’s not “wrong,” but note the implication:
+x_wheel is derived from position integration (unwrap)
+x_dot is derived from (filtered) ESC-reported velocity, not the derivative of x_wheel
+So position and velocity can become slightly inconsistent (especially if ESC velocity has bias or filtering). If you use both in LQR, that’s usually okay, but if you ever see weird state mismatch, this is a candidate.
+A possible fix is x_dot = (x_wheel - x_wheel_prev)/dt (and optionally filter that),
+
+*) dt 
+Unlike some code where dt only scales a constant, here dt directly affects alpha, so if your real loop jitters, your filter cutoff jitters too.
+At small jitter it’s fine. If you ever see weird filtering, you can:
+feed dt from your measured dt_us (instead of constant), or
+clamp dt to a sane range before using it in the filter (like you already do elsewhere for IMU dt)
+
+*) M_PI
+code uses both M_PI and PI. On Teensy/Arduino, PI is typically defined; M_PI is sometimes available but not guaranteed depending on includes. wrap uses M_PI, filter uses PI
+
+*) Initialization
+unwrap_init, prev_L, prev_R, unwrap_L, unwrap_R, vel_filt_L, vel_filt_R
+They must be static or otherwise persistent across calls and must be reset when you exit balance mode (you are resetting unwrap_init=false in your mode exit paths—good).
+
+*) WHEEL_RADIUS_M scaling
+Correct conceptually (rad → meters), but note: x_wheel is now linear distance (m), while your controller gain vector K_disc must match this scaling. Just keep that consistent.
+
+*) Limit maximum angle before shutting off
+
+Add cutoff at ±45 deg.
+
+*) Add angle offset calibration
+
+*) Add theta_offset and subtract from roll.
+
+*) Add roll-rate deadband and startup ramp
+
+*) Timing / Supervisor Infrastructure
+A. Confirm supervisor uses radians. 
+B. Signature mismatch fixed. 
+C. Tune
+
+*/ 
+
+
+
 // ---------------- Helper: update continuous wheel angles ----------------
+
 static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
                               float &x_wheel, float &x_dot,
                               float vel_L, float vel_R,

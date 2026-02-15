@@ -17,6 +17,8 @@
     -   `sup->mode = SUP_MODE_BALANCE_TWR` when ready.
 -   Run main loop that executes `controlLoop()` when `g_control_due` is
     set.
+-   Program enters `supervisor.mode = SUP_MODE_BALANCE_TWR` and initiates logging
+-   State entry is done through a button press or external python program
 
 ------------------------------------------------------------------------
 
@@ -153,7 +155,7 @@ Used Welford's online variance algorithm:
 -   Rejects accel when not near 1g.
 -   Prevents vibration corruption.
 
-### 3. Velocity LPF (Wheel)
+### 3. Velocity Low Pass Filter (LPF)
 
 First-order filter on wheel velocity.
 
@@ -175,5 +177,3 @@ Unless you address noise and vibration in the tilt detection system,\
 you don't have a balancing robot --- you have a random torque generator.
 
 ------------------------------------------------------------------------
-
-End of summary.

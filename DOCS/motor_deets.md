@@ -7,6 +7,7 @@
 - set par_ld 0.00014
 - set par_lq 0.00021
 - set par_r .65 
+- set par_pp 14
 
 ## FLIPSKY 6215 KV170
 - set par_ld 0.000015
