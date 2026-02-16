@@ -70,9 +70,9 @@ Why? Well:
 - Tuning is the real work — not a flaw, but part of the fun
 - What really makes a robot stand is eliminating all the problems like jitter, timing issues, CAN communications, and modeling
 
-**Finally, dearest reader**... I care about you, youre adorable, but quite unfortunately one of the ESCs that I use is closed source. Nothing would delight me more to make it open and I will try. Also note that for a while, I was using the Flipsky Mini FSESC6.7 pro 70A but I got tired of blowing them up because of cheap parts. Maybe some day I will make a version that runs on [moteus](https://mjbots.com/products/moteus-r4-11) or [odrive](https://odriverobotics.com) but right now that is not a priority. 
+**Finally, dearest reader**... I care about you, youre adorable, but quite unfortunately one the PCB for one of the ESCs that I use is closed source. Nothing would delight me more to make it open and I will try. For a while, I was using the Flipsky Mini FSESC6.7 pro 70A but I got tired of blowing them up because of cheap parts. Some day I will make a balancing bot that runs on [moteus](https://mjbots.com/products/moteus-r4-11) or [odrive](https://odriverobotics.com) but right now that is not a priority. 
 
-For these reasons and others you cant expect to use this repo to build a TWR like it a kit.
+For these reasons and others you cant expect to use this repo to build a balancing robot like some sort of kit.
 
 ## The really great news is there is a new source of help. 
 
@@ -91,7 +91,7 @@ A balancing robot is a complex closed-loop control problem. As far as I know I n
 
 The project was far less like copying code from the internet and more like having a very patient senior engineer building one-off code bundles to eventually get this thing to stand. 
 
-**We live in a world of prompt-driven engineering:** I shaped my thinking through prompts, refined those prompts based on the robot’s behavior, and used those conversations to build understanding that would have taken weeks on my own. ChatGPT didn’t “solve the problem” — it helped me reason through it, step by step.
+**We live in a world of prompt-driven engineering:** I shaped my thinking through prompts, refined those prompts based on the robot’s behavior, and used those conversations to build understanding that would have taken months on my own. ChatGPT didn’t “solve the problem” — it helped me reason through it, step by step.
 
 So if you see this robot standing and balancing in a video, know that behind the scenes was not just hardware and code — it was hundreds of micro-conversations, experiments, adjustments, and iterations. ChatGPT was the scaffolding that helped me structure that process.
 

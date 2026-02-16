@@ -46,13 +46,6 @@ Common issues that can break balancing in the brain board project, along with wh
 
 ---
 
-## Estimator Errors
-- **Cause:** State estimator provides wrong tilt/velocity due to noise or drift.
-- **Watch:** Innovation/residuals (measurement − prediction), divergence in estimated vs measured tilt.
-- **Mitigation:** Log innovations, abort if residuals exceed threshold.
-
----
-
 ## Startup Conditions
 - **Cause:** Robot starts too tilted (>15°) for linearization to hold.
 - **Watch:** Initial tilt angle when enabling balance mode.
@@ -71,7 +64,7 @@ Common issues that can break balancing in the brain board project, along with wh
 - **Frame Flexibility / Looseness**  
   - **Cause:** Weak materials, loose bolts, frame compliance.  
   - **Watch:** Buzzing or oscillation not predicted by model.  
-  - **Mitigation:** Rigid frame, thread-lock, stiffening braces.
+  - **Mitigation:** Rigid frame, moongel, thread-lock, stiffening braces.
 
 - **Wheel Slippage**  
   - **Cause:** Low friction tires/surfaces.  

@@ -99,6 +99,11 @@ void pack_float(float val, uint8_t *buf) {
 }
 
 static bool running = false; // motion enabled flag
+static float serial_cmd = 0.0f;
+
+#define LOOP1 1
+// #define LOOP2 1
+// #define LOOP3 0
 
 void setup() {
   Serial.begin(115200);
@@ -109,7 +114,12 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWriteFast(LED_PIN, HIGH);
 
+#if LOOP1
+  Serial.println("Enter a value to send to device.");
+#endif
+#if LOOP2
   Serial.println("Press any key to toggle motion START/STOP.");
+#endif
 
   delay(2000);
 
@@ -121,9 +131,71 @@ void setup() {
   // Can1.setMBFilter(ACCEPT_ALL, 0);  // depends on your FlexCAN_T4 usage
 }
 
-// #define LOOP1 0
-#define LOOP2 1
-// #define LOOP3 0
+#if LOOP1
+void loop() {
+  // Non-blocking send pacing (replaces delay(100))
+  static uint32_t last_send_ms = 0;
+  const uint32_t SEND_PERIOD_MS = 100;
+
+  // Service LED every loop (non-blocking)
+  // serviceRxLed();
+
+  // --- Serial input: read a float value per line ---
+  static char line_buf[32];
+  static size_t line_len = 0;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    Serial.println(c);
+    if (c == '\r' || c == '\n') {
+      if (line_len > 0) {
+        line_buf[line_len] = '\0';
+        serial_cmd = strtof(line_buf, nullptr);
+        line_len = 0;
+      }
+    } else if (line_len < sizeof(line_buf) - 1) {
+      line_buf[line_len++] = c;
+    }
+  }
+
+  // --- Drain CAN RX FIFO quickly ---
+  CAN_message_t msg;
+  while (Can1.read(msg)) {
+    noteCanRxActivity();  // <-- activity latch (any received frame)
+    bufferPush(msg);
+  }
+
+  // --- Process buffered frames ---
+  while (bufferPop(msg)) {
+    canHandler(msg);
+  }
+
+  // Rate-limit CAN TX without blocking loop
+  uint32_t now_ms = millis();
+  if (now_ms - last_send_ms < SEND_PERIOD_MS) {
+    return;
+  }
+  last_send_ms = now_ms;
+
+  // --- Send torque command from serial ---
+  float cmd = serial_cmd;
+
+  // --- Clamp safety range ---
+  if (cmd > 10.0f)  cmd = 10.0f;
+  if (cmd < -10.0f) cmd = -10.0f;
+
+  CAN_message_t msgL, msgR;
+  msgL.id = make_ext_id(CAN_ID_IQREQ, TEENSY_NODE_ID, ESC_NODE_ID1);
+  msgR.id = make_ext_id(CAN_ID_IQREQ, TEENSY_NODE_ID, ESC_NODE_ID2);
+  msgL.len = msgR.len = 8;
+  msgL.flags.extended = msgR.flags.extended = 1;
+  pack_float(cmd, msgL.buf);
+  pack_float(0.0f, msgL.buf + 4);
+  pack_float(cmd, msgR.buf);
+  pack_float(0.0f, msgR.buf + 4);
+  Can1.write(msgL);
+  Can1.write(msgR);
+}
+#endif
 
 #if LOOP2
 void loop() {

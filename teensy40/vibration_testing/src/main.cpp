@@ -32,14 +32,9 @@ LEDCtrl g_led_green;
 ICM42688 imu(SPI, CS_PIN);
 
 void setup() {
-#if SERIAL_WRITE
+
   Serial.begin(921600);
   while (!Serial && millis() < 1500) {}
-#endif
-
-#if TELEMETRY_WRITE
-  Serial1.begin(115200);
-#endif
 
   // LEDs / Pushbutton / Tone
   led_init(&g_led_red,   LED1_PIN, LED_BLINK_SLOW);

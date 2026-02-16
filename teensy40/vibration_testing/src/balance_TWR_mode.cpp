@@ -22,16 +22,16 @@ static int logIndex = 0;
 // ---------------- Discrete LQR gains ----------------
 // State ordering assumed: [theta, theta_dot, x_wheel, x_dot]^T
 static const float K_disc[4] = {
-  10.28505873560549f,
-  1.0301541575776232f,
-  -2.9755190901969173f,
-  -5.948216517508814f
+  8.69066899f,
+  1.12293145f,
+  -2.96754297f,
+  -7.74954812f  
 };
 
-constexpr float WHEEL_RADIUS_M = 0.040f; // use your real value
+constexpr float WHEEL_RADIUS_M = 0.05278f; 
 
-
-#define SEND_TORQUE 0
+// #define SEND_TORQUE
+#define SEND_TELEMETRY
 
 // ---------------- Control constants ----------------
 constexpr float TORQUE_CLAMP   = 4.0f;    // max |Nm| per wheel
@@ -94,9 +94,6 @@ At small jitter it’s fine. If you ever see weird filtering, you can:
 feed dt from your measured dt_us (instead of constant), or
 clamp dt to a sane range before using it in the filter (like you already do elsewhere for IMU dt)
 
-*) M_PI
-code uses both M_PI and PI. On Teensy/Arduino, PI is typically defined; M_PI is sometimes available but not guaranteed depending on includes. wrap uses M_PI, filter uses PI
-
 *) Initialization
 unwrap_init, prev_L, prev_R, unwrap_L, unwrap_R, vel_filt_L, vel_filt_R
 They must be static or otherwise persistent across calls and must be reset when you exit balance mode (you are resetting unwrap_init=false in your mode exit paths—good).
@@ -145,10 +142,10 @@ static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
   float dL = pos_L_raw - prev_L;
   float dR = pos_R_raw - prev_R;
 
-  if (dL >  M_PI) dL -= 2.0f * M_PI;
-  if (dL < -M_PI) dL += 2.0f * M_PI;
-  if (dR >  M_PI) dR -= 2.0f * M_PI;
-  if (dR < -M_PI) dR += 2.0f * M_PI;
+  if (dL >  PI) dL -= 2.0f * PI;
+  if (dL < -PI) dL += 2.0f * PI;
+  if (dR >  PI) dR -= 2.0f * PI;
+  if (dR < -PI) dR += 2.0f * PI;
 
   unwrap_L += dL;
   unwrap_R += dR;
@@ -257,11 +254,14 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     canPackFloat(0.0f, msgR.buf);
     canPackFloat(0.0f, msgR.buf + 4);
 
-#if SEND_TORQUE
+    #ifdef SEND_TORQUE
     can.write(msgL);
     can.write(msgR);
-#endif
+    #endif
+    
+    #ifdef SEND_TELEMETRY
     Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance aborted: tilt too large\"}");
+    #endif
 
     sup->mode = SUP_MODE_IDLE;
     first_entry = true;
@@ -302,7 +302,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   canPackFloat(torque_right, msgR.buf);
   canPackFloat(0.0f,         msgR.buf + 4);
 
-#if SEND_TORQUE
+#ifdef SEND_TORQUE
   can.write(msgL);
   can.write(msgR);
 #endif
@@ -315,6 +315,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
     uint32_t age_us = micros() - sup->imu.last_update_us;
 		    
+    #ifdef SEND_TELEMETRY
     Serial.printf(
 		  "{\"t\":%lu,"
 		  "\"pitch\":%.3f,"
@@ -337,6 +338,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 		  sup->timing.exec_time_us,
 		  sup->timing.overruns
 		  );
+    #endif
 
     // reset window (so this RMS corresponds to the last ~0.1s at 10Hz printing)
     pitch_rate_rms.reset();
@@ -360,7 +362,9 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   // ---------------- Optional timed exit ----------------
   // Currently disabled (as you had it).
   if (elapsed > sup->user_total_us && false) {
+    #ifdef SEND_TELEMETRY
     Serial.println("{\"samples\":[");
+
     for (int i = 0; i < logIndex; i++) {
       Serial.printf(
 		    "{\"t\":%lu,\"uL\":%.4f,\"uR\":%.4f,"
@@ -382,4 +386,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     first_entry = true;
     unwrap_init = false;
   }
+  #endif
+
 }

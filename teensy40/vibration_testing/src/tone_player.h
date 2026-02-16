@@ -3,10 +3,6 @@
 
 #include <Arduino.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 static constexpr uint32_t PB_BEEP_HZ = 2000;
 static constexpr uint32_t PB_BEEP_MS = 150;
 static constexpr uint32_t PB_GAP_MS  = 100;
@@ -42,9 +38,5 @@ void tone_update(TonePlayer* tp, uint32_t now_us);
 static inline bool tone_is_playing(const TonePlayer* tp)  { return tp->state == TONE_PLAYING; }
 static inline bool tone_is_silence(const TonePlayer* tp)  { return tp->state == TONE_SILENCE; }
 static inline bool tone_is_idle(const TonePlayer* tp)     { return tp->state == TONE_IDLE;    }
-
-#ifdef __cplusplus
-} // extern "C"
-#endif
 
 #endif // TONE_PLAYER_H

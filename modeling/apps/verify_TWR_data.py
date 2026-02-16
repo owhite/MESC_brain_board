@@ -193,6 +193,10 @@ def verify_twr_data(json_path: str):
             diff = np.max(np.abs(s1 - s2)) if s1.size == s2.size else float("inf")
             print(f"  eig_disc stored vs recomputed max |Δ| = {diff:.3e}")
 
+    print("\n🎛️  Gains (from JSON):")
+    print("  K_cont:", np.array(data["K_cont"]))
+    print("  K_disc:", np.array(data["K_disc"]))
+
     # --- Summary verdict ---
     print("\n✅ Verification summary:")
     ok = True
@@ -208,6 +212,7 @@ def verify_twr_data(json_path: str):
     else:
         print("  → ⚠️ One or more checks failed — inspect matrices/params and JSON generation.")
 
+    print("\nBe sure to confirm in your code that: \n1) theta is in radians\n2) theta_dot is in rad/s\n3) x_wheel is wheel angle (rad) scaled by WHEEL_RADIUS_M to meters; \n4) and x_dot is wheel velocity (rad/s) scaled by WHEEL_RADIUS_M to m/s.")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
