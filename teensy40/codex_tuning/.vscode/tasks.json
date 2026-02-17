@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlatformIO Build (teensy40)",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run", "-e", "teensy40"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "PlatformIO Upload",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run", "-e", "teensy40", "-t", "upload"],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
