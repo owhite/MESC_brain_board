@@ -11,6 +11,17 @@
         {
             "type": "platformio-debug",
             "request": "launch",
+            "name": "Upload",
+            "executable": "/Users/owhite/balancing-robot-notes/teensy40/vibration_testing/.pio/build/teensy40/firmware.elf",
+            "projectEnvName": "teensy40",
+            "toolchainBinDir": "/Users/owhite/.platformio/packages/toolchain-gccarmnoneeabi-teensy/bin",
+            "internalConsoleOptions": "openOnSessionStart",
+            "preLaunchTask": "PlatformIO Upload",
+            "loadMode": "manual"
+        },
+        {
+            "type": "platformio-debug",
+            "request": "launch",
             "name": "PIO Debug",
             "executable": "/Users/owhite/balancing-robot-notes/teensy40/vibration_testing/.pio/build/teensy40/firmware.elf",
             "projectEnvName": "teensy40",

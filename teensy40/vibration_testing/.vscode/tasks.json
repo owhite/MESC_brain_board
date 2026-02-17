@@ -8,6 +8,14 @@
       "args": ["run", "-e", "teensy40"],
       "group": "build",
       "problemMatcher": []
+    },
+    {
+      "label": "PlatformIO Upload",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run", "-e", "teensy40", "-t", "upload"],
+      "group": "build",
+      "problemMatcher": []
     }
   ]
 }
