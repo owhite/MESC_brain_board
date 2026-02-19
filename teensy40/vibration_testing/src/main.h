@@ -27,4 +27,7 @@
 #define RC_INPUT5       5
 #define RC_INPUT6       4
 
+// Non-blocking short beeper chirp (uses TonePlayer state machine)
+void beeper_tweet();
+
 #endif // MAIN_H

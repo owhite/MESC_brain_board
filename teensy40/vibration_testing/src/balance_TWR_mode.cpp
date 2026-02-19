@@ -21,22 +21,30 @@ static int logIndex = 0;
 
 // ---------------- Discrete LQR gains ----------------
 // State ordering assumed: [theta, theta_dot, x_wheel, x_dot]^T
+/*
 static const float K_disc[4] = {
   8.69066899f,
   1.12293145f,
   -2.96754297f,
-  -7.74954812f  
+  -6.8f  
 };
+*/
 
+static const float K_disc[4] = {
+  9.0f,
+  1.12f,
+  -3.8f,
+  -5.0f  
+};
 constexpr float WHEEL_RADIUS_M = 0.05278f; 
 
-// #define SEND_TORQUE
+#define SEND_TORQUE
 #define SEND_TELEMETRY
+// #define SEND_LOG 
 
 // ---------------- Control constants ----------------
-constexpr float TORQUE_CLAMP   = 4.0f;    // max |Nm| per wheel
-constexpr float SAFETY_SCALE   = 0.5f;   // global scaling (tune; set to 1.0f when confident)
-constexpr float THETA_EQ       = 0.0f;    // body upright = 0 rad
+constexpr float TORQUE_CLAMP   = 3.0f;    // max |Nm| per wheel
+constexpr float SAFETY_SCALE   = 0.4f;   // global scaling (tune; set to 1.0f when confident)
 constexpr float THETA_FAIL_RAD = 0.6f;    // ~34 deg: beyond this, bail to idle
 
 static int report_counter = 0;
@@ -127,40 +135,78 @@ static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
                               float vel_L, float vel_R,
                               float dt)
 {
+  const float two_pi = 2.0f * PI;
+  const float dt_safe = (isfinite(dt) && dt > 0.0f) ? dt : (CONTROL_PERIOD_US * 1e-6f);
+
+  // Reject non-finite position samples entirely for this tick.
+  const bool posL_finite = isfinite(pos_L_raw);
+  const bool posR_finite = isfinite(pos_R_raw);
+
   // Initialize unwrap on first call in this mode
   if (!unwrap_init) {
+    if (!posL_finite || !posR_finite) {
+      x_wheel = 0.0f;
+      x_dot   = 0.0f;
+      return;
+    }
+
     prev_L = pos_L_raw;
     prev_R = pos_R_raw;
     unwrap_L = 0.0f;
     unwrap_R = 0.0f;
-    vel_filt_L = vel_L;
-    vel_filt_R = vel_R;
+    vel_filt_L = isfinite(vel_L) ? vel_L : 0.0f;
+    vel_filt_R = isfinite(vel_R) ? vel_R : 0.0f;
     unwrap_init = true;
   }
 
   // Compute incremental angles with wrap handling
-  float dL = pos_L_raw - prev_L;
-  float dR = pos_R_raw - prev_R;
+  if (posL_finite) {
+    float dL = pos_L_raw - prev_L;
+    while (dL >= PI)  dL -= two_pi;
+    while (dL < -PI)  dL += two_pi;
 
-  if (dL >  PI) dL -= 2.0f * PI;
-  if (dL < -PI) dL += 2.0f * PI;
-  if (dR >  PI) dR -= 2.0f * PI;
-  if (dR < -PI) dR += 2.0f * PI;
+    // Plausibility gate: reject one-sample position jumps.
+    const float max_step_L = fmaxf(0.20f, (fabsf(isfinite(vel_L) ? vel_L : 0.0f) + 10.0f) * dt_safe);
+    if (fabsf(dL) <= max_step_L) {
+      unwrap_L += dL;
+      prev_L = pos_L_raw;
+    }
+  }
 
-  unwrap_L += dL;
-  unwrap_R += dR;
+  if (posR_finite) {
+    float dR = pos_R_raw - prev_R;
+    while (dR >= PI)  dR -= two_pi;
+    while (dR < -PI)  dR += two_pi;
 
-  prev_L = pos_L_raw;
-  prev_R = pos_R_raw;
+    // Plausibility gate: reject one-sample position jumps.
+    const float max_step_R = fmaxf(0.20f, (fabsf(isfinite(vel_R) ? vel_R : 0.0f) + 10.0f) * dt_safe);
+    if (fabsf(dR) <= max_step_R) {
+      unwrap_R += dR;
+      prev_R = pos_R_raw;
+    }
+  }
 
   // Optional velocity low-pass filter (simple 1st-order)
   // Cutoff ~20 Hz at CONTROL_PERIOD
   const float fc    = 20.0f;
   const float RC    = 1.0f / (2.0f * PI * fc);
-  const float alpha = dt / (dt + RC);
+  float alpha = dt_safe / (dt_safe + RC);
+  if (!isfinite(alpha) || alpha < 0.0f) alpha = 0.0f;
+  if (alpha > 1.0f) alpha = 1.0f;
 
-  vel_filt_L += alpha * (vel_L - vel_filt_L);
-  vel_filt_R += alpha * (vel_R - vel_filt_R);
+  float vel_in_L = isfinite(vel_L) ? vel_L : vel_filt_L;
+  float vel_in_R = isfinite(vel_R) ? vel_R : vel_filt_R;
+
+  const float max_dv = 30.0f;
+  float dvL = vel_in_L - vel_filt_L;
+  float dvR = vel_in_R - vel_filt_R;
+  if (dvL > max_dv) vel_in_L = vel_filt_L + max_dv;
+  if (dvL < -max_dv) vel_in_L = vel_filt_L - max_dv;
+  if (dvR > max_dv) vel_in_R = vel_filt_R + max_dv;
+  if (dvR < -max_dv) vel_in_R = vel_filt_R - max_dv;
+
+  vel_filt_L += alpha * (vel_in_L - vel_filt_L);
+  vel_filt_R += alpha * (vel_in_R - vel_filt_R);
 
   // Forward position and velocity (average of two wheels)
   x_wheel = 0.5f * (unwrap_L + unwrap_R);
@@ -194,7 +240,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     canPackFloat(0.0f, msgL.buf + 4);
     canPackFloat(0.0f, msgR.buf);
     canPackFloat(0.0f, msgR.buf + 4);
-#if SEND_TORQUE
+#ifdef SEND_TORQUE
     can.write(msgL);
     can.write(msgR);
 #endif 
@@ -209,6 +255,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     logIndex    = 0;
     start_time  = micros();
 
+
     Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance mode started\"}");
   }
 
@@ -217,7 +264,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   // ---------------- Sensor feedback ----------------
   // Body angle and rate from IMU (radians and rad/s)
-  float theta     = sup->imu.pitch_rad - THETA_EQ;
+
+  float theta     = sup->imu.pitch_rad - sup->balance_theta_target_rad;
   float theta_dot = sup->imu.pitch_rate;
   pitch_rate_rms.push(sup->imu.pitch_rate); 
   rate_rms_raw.push(sup->imu.pitch_rate_raw);
@@ -259,10 +307,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     can.write(msgR);
     #endif
     
-    #ifdef SEND_TELEMETRY
-    Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance aborted: tilt too large\"}");
-    #endif
-
     sup->mode = SUP_MODE_IDLE;
     first_entry = true;
     unwrap_init = false;
@@ -283,9 +327,10 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   if (u > TORQUE_CLAMP)  u = TORQUE_CLAMP;
   if (u < -TORQUE_CLAMP) u = -TORQUE_CLAMP;
 
-  // Symmetric torque to both wheels (signs match ESC expectations)
-  float torque_left  =  u;
-  float torque_right = -u;
+  // ESC torque directions are mirrored.
+  // Using opposite-sign commands produces same physical wheel torque (forward/back).
+  float torque_left  =  -u;
+  float torque_right = u;
 
   // ---------------- Send torque over CAN ----------------
   CAN_message_t msgL, msgR;
@@ -346,6 +391,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     rate_rms_filt.reset();
   }
 
+  #ifdef SEND_LOG
   // ---------------- Logging ----------------
   if (logIndex < LOGLEN) {
     logBuffer[logIndex++] = {
@@ -361,8 +407,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   // ---------------- Optional timed exit ----------------
   // Currently disabled (as you had it).
-  if (elapsed > sup->user_total_us && false) {
-    #ifdef SEND_TELEMETRY
+
+  if (elapsed > sup->user_total_us ) {
     Serial.println("{\"samples\":[");
 
     for (int i = 0; i < logIndex; i++) {
