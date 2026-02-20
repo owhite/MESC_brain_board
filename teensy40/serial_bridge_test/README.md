@@ -1,4 +1,4 @@
-# System Summary --- Teensy ⇄ ESP32 ⇄ Wi-Fi ⇄ Desktop
+# System Summary: Teensy ⇄ ESP32 ⇄ Wi-Fi ⇄ Desktop
 
 **An ESP32-WROOM-32 (Xtensa LX6) running Arduino firmware acts as a
 Wi-Fi TCP bridge between Teensy 4.0 Serial1 (GPIO16/17 via UART2) and a
