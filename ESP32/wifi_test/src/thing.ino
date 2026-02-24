@@ -14,6 +14,22 @@ static const int UART_RX_PIN = 16;               // ESP32 RX  (connect to Teensy
 static const int UART_TX_PIN = 17;               // ESP32 TX  (connect to Teensy RX1)
 static const uint32_t UART_BAUD = 115200;
 
+// Buffer sizing
+static const size_t BUF_SZ = 4096;
+
+// While proving the chain, use test-drop mode (never stall UART reads).
+// For true lossless forwarding under WiFi stalls, set this true AND consider adding a larger ring buffer.
+static const bool LOSSLESS_MODE = false;
+
+// Pending buffer for UART->TCP partial writes (bounded, single-chunk)
+static uint8_t tcpPending[BUF_SZ];
+static size_t  tcpPendingLen = 0;
+static size_t  tcpPendingOff = 0;
+
+// Shared IO buffers (avoid big stack allocations)
+static uint8_t uartBuf[BUF_SZ];
+static uint8_t tcpBuf[BUF_SZ];
+
 // Debug serial (USB) baud
 static const uint32_t DEBUG_BAUD = 115200;
 
@@ -23,9 +39,6 @@ static const uint32_t HEARTBEAT_MS = 250;
 
 // LED RX-activity timing (when receiving data from Teensy over UART)
 static const uint32_t RX_LED_HOLD_MS = 40;       // LED stays ON this long after last RX byte
-
-// Buffers
-static const size_t BUF_SZ = 1024;
 // ============================
 
 WiFiServer server(TCP_PORT);
@@ -117,7 +130,14 @@ static void acceptClientIfNeeded()
   WiFiClient newClient = server.available();
   if (newClient) {
     client = newClient;
-    client.setNoDelay(true);
+
+    // For bulk dumps, leaving Nagle enabled is usually fine (less overhead).
+    // If you want lowest latency for interactive commands, set true.
+    client.setNoDelay(false);
+
+    // Reset pending state on new connection
+    tcpPendingLen = 0;
+    tcpPendingOff = 0;
 
     Serial.print("TCP client connected from: ");
     Serial.println(client.remoteIP());
@@ -128,60 +148,125 @@ static void pumpTcpToUart()
 {
   if (!client || !client.connected()) return;
 
-  uint8_t buf[BUF_SZ];
   int avail = client.available();
   if (avail <= 0) return;
 
   int toRead = (avail > (int)BUF_SZ) ? (int)BUF_SZ : avail;
-  int n = client.read(buf, toRead);
+  int n = client.read(tcpBuf, toRead);
   if (n > 0) {
     tcpRxBytes += (uint32_t)n;
-    TeensyUart.write(buf, n);
+    TeensyUart.write(tcpBuf, n);
     uartTxBytes += (uint32_t)n;
+  }
+}
 
-    // Debug: only print occasionally to avoid spam
-    // Serial.printf("TCP->UART %d bytes\n", n);
+static void flushPendingToTcp()
+{
+  if (!(client && client.connected())) return;
+  if (tcpPendingLen == 0) return;
+
+  // Bound work per loop() so we don't starve other tasks
+  const int maxIters = 4;
+  int iters = 0;
+
+  while (tcpPendingOff < tcpPendingLen && iters++ < maxIters) {
+    size_t remaining = tcpPendingLen - tcpPendingOff;
+
+    // Try to write; do NOT rely on availableForWrite() (it can be 0 even when writes succeed).
+    // Cap chunk size to keep packets reasonable.
+    size_t chunk = remaining;
+    if (chunk > 2048) chunk = 2048;
+
+    int written = client.write(tcpPending + tcpPendingOff, chunk);
+    if (written <= 0) {
+      // Can't write right now (backpressure). Try again next loop.
+      break;
+    }
+
+    tcpPendingOff += (size_t)written;
+    tcpTxBytes += (uint32_t)written;
+  }
+
+  if (tcpPendingOff >= tcpPendingLen) {
+    tcpPendingLen = 0;
+    tcpPendingOff = 0;
   }
 }
 
 static void pumpUartToTcp()
 {
-  // IMPORTANT: We still want to confirm we are receiving UART data even if no TCP client.
-  uint8_t buf[BUF_SZ];
+  // Flush any remainder first
+  flushPendingToTcp();
+
+  // In lossless mode, pause UART reads while pending exists (prevents overflow of tcpPending).
+  // In test mode, continue draining UART and drop if TCP is stalled.
+  if (LOSSLESS_MODE && tcpPendingLen != 0) {
+    return;
+  }
+
   int avail = TeensyUart.available();
   if (avail <= 0) return;
 
   int toRead = (avail > (int)BUF_SZ) ? (int)BUF_SZ : avail;
 
-  TeensyUart.setTimeout(2);
-  int n = TeensyUart.readBytes(buf, toRead);
+  // Non-blocking read
+  int n = TeensyUart.read(uartBuf, toRead);
+  if (n <= 0) return;
 
-  if (n > 0) {
-    uartRxBytes += (uint32_t)n;
+  uartRxBytes += (uint32_t)n;
+  rxLedUntilMs = millis() + RX_LED_HOLD_MS;
 
-    // Trigger LED RX activity indicator
-    rxLedUntilMs = millis() + RX_LED_HOLD_MS;
-
-    // Debug: show first few bytes of the first packet after boot
-    static bool showedSample = false;
-    if (!showedSample) {
-      showedSample = true;
-      Serial.print("UART RX sample (first 16 bytes): ");
-      int m = (n < 16) ? n : 16;
-      for (int i = 0; i < m; i++) {
-        if (buf[i] < 16) Serial.print("0");
-        Serial.print(buf[i], HEX);
-        Serial.print(" ");
-      }
-      Serial.println();
+  // Debug: show first few bytes once
+  static bool showedSample = false;
+  if (!showedSample) {
+    showedSample = true;
+    Serial.print("UART RX sample (first 16 bytes): ");
+    int m = (n < 16) ? n : 16;
+    for (int i = 0; i < m; i++) {
+      if (uartBuf[i] < 16) Serial.print("0");
+      Serial.print(uartBuf[i], HEX);
+      Serial.print(" ");
     }
+    Serial.println();
+  }
 
-    // If TCP client exists, forward; otherwise just drop (but counters prove receipt)
-    if (client && client.connected()) {
-      client.write(buf, n);
-      tcpTxBytes += (uint32_t)n;
+  // If no TCP client, drop bytes (counters prove receipt)
+  if (!(client && client.connected())) {
+    return;
+  }
+
+  // Attempt to write immediately; do NOT trust availableForWrite() as a gate.
+  // Cap the immediate write size to avoid huge bursts.
+  int toSend = n;
+  if (toSend > 2048) toSend = 2048;
+
+  int written = client.write(uartBuf, toSend);
+  if (written > 0) {
+    tcpTxBytes += (uint32_t)written;
+  } else {
+    written = 0; // treat as no write
+  }
+
+  int consumed = written;
+  int remaining = n - consumed;
+
+  if (remaining > 0) {
+    if (LOSSLESS_MODE) {
+      // Stash as much as we can of the remainder (bounded by BUF_SZ)
+      int stash = remaining;
+      if (stash > (int)BUF_SZ) stash = (int)BUF_SZ;
+      memcpy(tcpPending, uartBuf + consumed, (size_t)stash);
+      tcpPendingLen = (size_t)stash;
+      tcpPendingOff = 0;
+
+      // If remainder > BUF_SZ, extra is dropped (bounded buffer).
+    } else {
+      // test mode: drop remainder
     }
   }
+
+  // If we only sent up to 2048 and there is still data in uartBuf, we intentionally drop it
+  // in test mode, or stash part in lossless mode. Teensy will resend on the next dump anyway.
 }
 
 static void statsTick()
@@ -190,12 +275,23 @@ static void statsTick()
   if (now - lastStatsMs < 1000) return;
   lastStatsMs = now;
 
+  // availableForWrite() is still useful as a diagnostic even if we don't trust it for gating
+  int afw = (client && client.connected()) ? client.availableForWrite() : -1;
+  size_t pend = (tcpPendingLen >= tcpPendingOff) ? (tcpPendingLen - tcpPendingOff) : 0;
+
   Serial.print("[STATS] up=");
   Serial.print((now - bootMs) / 1000);
   Serial.print("s  WiFi=");
   Serial.print((WiFi.status() == WL_CONNECTED) ? "OK" : "DOWN");
   Serial.print("  TCP=");
   Serial.print((client && client.connected()) ? "CONNECTED" : "none");
+  Serial.print("  AFW=");
+  Serial.print(afw);
+  Serial.print("  PEND=");
+  Serial.print((unsigned)pend);
+  Serial.print("B  MODE=");
+  Serial.print(LOSSLESS_MODE ? "lossless" : "testdrop");
+
   Serial.print("  UART_RX=");
   Serial.print(uartRxBytes);
   Serial.print("B  UART_TX=");
@@ -222,10 +318,10 @@ void setup()
   Serial.printf("UART2 pins: RX=%d TX=%d baud=%lu\n", UART_RX_PIN, UART_TX_PIN, (unsigned long)UART_BAUD);
   Serial.printf("WiFi SSID: %s\n", WIFI_SSID);
   Serial.printf("TCP port: %u  mDNS: %s.local\n", TCP_PORT, MDNS_NAME);
+  Serial.printf("BUF_SZ: %u  MODE: %s\n", (unsigned)BUF_SZ, LOSSLESS_MODE ? "lossless" : "testdrop");
 
   TeensyUart.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   TeensyUart.setRxBufferSize(8 * 1024);
-
   Serial.println("TeensyUart started.");
 
   wifiConnect();

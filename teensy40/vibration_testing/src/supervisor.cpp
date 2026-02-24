@@ -404,8 +404,7 @@ void controlLoop(ICM42688 &imu, Supervisor_typedef *sup,
       // store raw into the struct:
       sup->imu.pitch_rate_raw = pitch_rate_raw;
 
-      // Low pass filter against vibration
-      const float rate_alpha = 0.03f; 
+      const float rate_alpha = 0.03f; // LPF against vibration
       float pitch_rate =
           rate_alpha * pitch_rate_raw +
           (1.0f - rate_alpha) * sup->imu.pitch_rate;

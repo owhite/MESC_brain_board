@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlatformIO Build (teensy40)",
+      "type": "shell",
+      "command": "/Users/owhite/.platformio/penv/bin/platformio",
+      "args": ["run", "-e", "teensy40"],
+      "isBackground": false,
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "showReuseMessage": false,
+        "close": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PlatformIO Upload",
+      "type": "shell",
+      "command": "/Users/owhite/.platformio/penv/bin/platformio",
+      "args": ["run", "-e", "teensy40", "-t", "upload"],
+      "isBackground": false,
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "showReuseMessage": false,
+        "close": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

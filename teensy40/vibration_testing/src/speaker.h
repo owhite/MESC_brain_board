@@ -4,6 +4,10 @@
 #include <Arduino.h>
 #include <stddef.h>  // size_t
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void speaker_start_tone(uint16_t freq_hz);  // starts continuous tone at freq
 void speaker_stop_tone(void);               // stops any tone immediately
 
@@ -40,5 +44,9 @@ void speaker_set_mode(Speaker *spk, SpeakerMode mode);
 
 // Call often (e.g., once per loop). balance_active is used only for TIE_TO_BALANCE.
 void speaker_update(Speaker *spk, uint32_t now_us, bool balance_active);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif // SPEAKER_H

@@ -24,13 +24,6 @@ CANBuffer canRxBuf;  // ✅ holds buffer + link_ok
 // -------------------- Tone / Pushbutton --------------------
 static TonePlayer g_tone;
 PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
-static bool g_pb_target_latched = false;
-static float g_pb_target_pitch_rad = 0.0f;
-static PBState g_pb_prev_raw = PB_RELEASED;
-
-void beeper_tweet() {
-  tone_start(&g_tone, 2800, 60, 0);
-}
 
 // --------------------- LED instances -----------------------
 static LEDCtrl g_led_red;
@@ -39,9 +32,14 @@ LEDCtrl g_led_green;
 ICM42688 imu(SPI, CS_PIN);
 
 void setup() {
-
+#if SERIAL_WRITE
   Serial.begin(921600);
   while (!Serial && millis() < 1500) {}
+#endif
+
+#if TELEMETRY_WRITE
+  Serial1.begin(115200);
+#endif
 
   // LEDs / Pushbutton / Tone
   led_init(&g_led_red,   LED1_PIN, LED_BLINK_SLOW);
@@ -89,47 +87,6 @@ void loop() {
     handleCANMessage(msg);
   }
 
-  uint32_t now_us = micros();
-
-  // PUSHBUTTON (run every loop to avoid latency in target capture)
-  PBState pb_raw = g_button.readRaw();
-  if (pb_raw == PB_PRESSED && g_pb_prev_raw == PB_RELEASED) {
-    g_pb_target_pitch_rad = supervisor.imu.pitch_rad;
-    g_pb_target_latched = true;
-  }
-  g_pb_prev_raw = pb_raw;
-
-  g_button.update(now_us);
-  if (g_button.hasChanged()) {
-    PBState pb_state = g_button.getState();
-
-    if (pb_state == PB_PRESSED) {
-      tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    }
-    else if (pb_state == PB_RELEASED && g_button.isArmed()) {
-      SupervisorMode test_mode = SUP_MODE_BALANCE_TWR;
-
-      if (supervisor.mode == test_mode) {
-        supervisor.mode = SUP_MODE_IDLE;
-      } else {
-        if (g_pb_target_latched) {
-          supervisor.balance_theta_target_rad = g_pb_target_pitch_rad;
-        } else {
-          supervisor.balance_theta_target_rad = supervisor.imu.pitch_rad;
-        }
-        supervisor.mode = test_mode;
-      }
-      g_pb_target_latched = false;
-
-      LEDState cur  = g_led_red.state;
-      LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
-      if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
-      led_set_state(&g_led_red, next);
-      g_button.clearArmed();
-    }
-    g_button.clearChanged();
-  }
-
   static String input = "";
 
   // -------- LOW PRIORITY --------
@@ -137,6 +94,7 @@ void loop() {
   // ---
 
   static uint32_t last_lowprio_us = 0;
+  uint32_t now_us = micros();
 
   if (now_us - last_lowprio_us >= (CONTROL_PERIOD_US * 100)) {
     last_lowprio_us = now_us;
@@ -175,7 +133,6 @@ void loop() {
 	      supervisor.mode = SUP_MODE_IDLE;
 	    }
 	    else {
-        supervisor.balance_theta_target_rad = supervisor.imu.pitch_rad;
 	      supervisor.mode = SUP_MODE_BALANCE_TWR;
 	    }
 	  }
@@ -195,6 +152,35 @@ void loop() {
     if (millis() - supervisor.last_health_ms > 1000) {
       supervisor.last_health_ms = millis();
       led_set_state(&g_led_green, canRxBuf.link_ok ? LED_ON_CONTINUOUS : LED_BLINK_SLOW);
+    }
+
+    // PUSHBUTTON
+    g_button.update(now_us);
+    if (g_button.hasChanged()) {
+      PBState pb_state = g_button.getState();
+
+      if (pb_state == PB_PRESSED) {
+	// SPEAKER
+	tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+      }
+      else if (pb_state == PB_RELEASED && g_button.isArmed()) {
+
+	// User can switch mode by pressing button
+	SupervisorMode test_mode = SUP_MODE_BALANCE_TWR;
+
+	if (supervisor.mode == test_mode) {
+	  supervisor.mode = SUP_MODE_IDLE;
+	} else {
+	  supervisor.mode = test_mode;
+	}
+
+	LEDState cur  = g_led_red.state;
+	LEDState next = (cur == LED_BLINK_FAST) ? LED_BLINK_SLOW : LED_BLINK_FAST;
+	if (cur != LED_BLINK_FAST && cur != LED_BLINK_SLOW) next = LED_BLINK_FAST;
+	led_set_state(&g_led_red, next);
+	g_button.clearArmed();
+      }
+      g_button.clearChanged();
     }
 
     // Resets timing stats

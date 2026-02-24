@@ -117,7 +117,6 @@ struct Supervisor_typedef {
   float user_setpoint = M_PI;
   float user_Kp_term = 0.0f;
   float user_Kd_term = 0.0f; 
-  float balance_theta_target_rad = 0.0f;
   float user_pulse_torque   = 0.2f;    // amplitude of torque pulse
   uint32_t user_pulse_us    = 1000;   // duration of pulse (µs)
   uint32_t user_total_us    = 1000;

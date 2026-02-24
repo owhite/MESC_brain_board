@@ -5,29 +5,32 @@
 #include <IntervalTimer.h>
 #include <FlexCAN_T4.h>
 
-// ================= MESC CAN definitions =================
-#define CAN_ID_IQREQ    0x001
-#define TEENSY_NODE_ID  0x03 // sender (is this Teensy)
+#define TELEMETRY_WRITE 0
+#define SERIAL_WRITE 1
 
-// ================= Peripherals =================
+
+// MESC CAN ID for Iq request
+#define CAN_ID_IQREQ  0x001
+
+// IDs
+#define TEENSY_NODE_ID  0x03   // sender (this Teensy)
+#define ESC_NODE_ID     0x0B 
+
+// ================= Pins from your board =================
 #define LED1_PIN        2
 #define LED2_PIN        3
 #define PUSHBUTTON_PIN  19
 #define SPEAKER_PIN     14
 #define CS_PIN          10
 #define INT_PIN         20
-#define CAN_TX          24
-#define CAN_RX          25
 
-// ================= RC PWM channels =================
+// ================= RC PWM (4 channels) =================
 #define RC_INPUT1       9
 #define RC_INPUT2       8
 #define RC_INPUT3       7
 #define RC_INPUT4       6
-#define RC_INPUT5       5
-#define RC_INPUT6       4
 
-// Non-blocking short beeper chirp (uses TonePlayer state machine)
-void beeper_tweet();
+#define CAN_TX          24
+#define CAN_RX          25
 
 #endif // MAIN_H

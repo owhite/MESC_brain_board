@@ -21,30 +21,22 @@ static int logIndex = 0;
 
 // ---------------- Discrete LQR gains ----------------
 // State ordering assumed: [theta, theta_dot, x_wheel, x_dot]^T
-/*
 static const float K_disc[4] = {
-  8.69066899f,
-  1.12293145f,
-  -2.96754297f,
-  -6.8f  
+  10.28505873560549f,
+  1.0301541575776232f,
+  -2.9755190901969173f,
+  -5.948216517508814f
 };
-*/
 
-static const float K_disc[4] = {
-  9.0f,
-  1.12f,
-  -3.8f,
-  -5.0f  
-};
-constexpr float WHEEL_RADIUS_M = 0.05278f; 
+constexpr float WHEEL_RADIUS_M = 0.040f; // use your real value
 
-#define SEND_TORQUE
-#define SEND_TELEMETRY
-// #define SEND_LOG 
+
+#define SEND_TORQUE 0
 
 // ---------------- Control constants ----------------
-constexpr float TORQUE_CLAMP   = 3.0f;    // max |Nm| per wheel
-constexpr float SAFETY_SCALE   = 0.4f;   // global scaling (tune; set to 1.0f when confident)
+constexpr float TORQUE_CLAMP   = 4.0f;    // max |Nm| per wheel
+constexpr float SAFETY_SCALE   = 0.5f;   // global scaling (tune; set to 1.0f when confident)
+constexpr float THETA_EQ       = 0.0f;    // body upright = 0 rad
 constexpr float THETA_FAIL_RAD = 0.6f;    // ~34 deg: beyond this, bail to idle
 
 static int report_counter = 0;
@@ -84,129 +76,46 @@ static RunningStats rate_rms_raw;
 static RunningStats rate_rms_filt;
 static int rms_counter = 0;
 
-/* 
-POTENTIAL ISSUES:
-
-*) SEE ALSO: system_assumptions.md
-
-*) Using filtered velocity for x_dot but unwrapped angle for x_wheel
-That’s not “wrong,” but note the implication:
-x_wheel is derived from position integration (unwrap)
-x_dot is derived from (filtered) ESC-reported velocity, not the derivative of x_wheel
-So position and velocity can become slightly inconsistent (especially if ESC velocity has bias or filtering). If you use both in LQR, that’s usually okay, but if you ever see weird state mismatch, this is a candidate.
-A possible fix is x_dot = (x_wheel - x_wheel_prev)/dt (and optionally filter that),
-
-*) dt 
-Unlike some code where dt only scales a constant, here dt directly affects alpha, so if your real loop jitters, your filter cutoff jitters too.
-At small jitter it’s fine. If you ever see weird filtering, you can:
-feed dt from your measured dt_us (instead of constant), or
-clamp dt to a sane range before using it in the filter (like you already do elsewhere for IMU dt)
-
-*) Initialization
-unwrap_init, prev_L, prev_R, unwrap_L, unwrap_R, vel_filt_L, vel_filt_R
-They must be static or otherwise persistent across calls and must be reset when you exit balance mode (you are resetting unwrap_init=false in your mode exit paths—good).
-
-*) WHEEL_RADIUS_M scaling
-Correct conceptually (rad → meters), but note: x_wheel is now linear distance (m), while your controller gain vector K_disc must match this scaling. Just keep that consistent.
-
-*) Limit maximum angle before shutting off
-
-Add cutoff at ±45 deg.
-
-*) Add angle offset calibration
-
-*) Add theta_offset and subtract from roll.
-
-*) Add roll-rate deadband and startup ramp
-
-*) Timing / Supervisor Infrastructure
-A. Confirm supervisor uses radians. 
-B. Signature mismatch fixed. 
-C. Tune
-
-*/ 
-
-
-
 // ---------------- Helper: update continuous wheel angles ----------------
-
 static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
                               float &x_wheel, float &x_dot,
                               float vel_L, float vel_R,
                               float dt)
 {
-  const float two_pi = 2.0f * PI;
-  const float dt_safe = (isfinite(dt) && dt > 0.0f) ? dt : (CONTROL_PERIOD_US * 1e-6f);
-
-  // Reject non-finite position samples entirely for this tick.
-  const bool posL_finite = isfinite(pos_L_raw);
-  const bool posR_finite = isfinite(pos_R_raw);
-
   // Initialize unwrap on first call in this mode
   if (!unwrap_init) {
-    if (!posL_finite || !posR_finite) {
-      x_wheel = 0.0f;
-      x_dot   = 0.0f;
-      return;
-    }
-
     prev_L = pos_L_raw;
     prev_R = pos_R_raw;
     unwrap_L = 0.0f;
     unwrap_R = 0.0f;
-    vel_filt_L = isfinite(vel_L) ? vel_L : 0.0f;
-    vel_filt_R = isfinite(vel_R) ? vel_R : 0.0f;
+    vel_filt_L = vel_L;
+    vel_filt_R = vel_R;
     unwrap_init = true;
   }
 
   // Compute incremental angles with wrap handling
-  if (posL_finite) {
-    float dL = pos_L_raw - prev_L;
-    while (dL >= PI)  dL -= two_pi;
-    while (dL < -PI)  dL += two_pi;
+  float dL = pos_L_raw - prev_L;
+  float dR = pos_R_raw - prev_R;
 
-    // Plausibility gate: reject one-sample position jumps.
-    const float max_step_L = fmaxf(0.20f, (fabsf(isfinite(vel_L) ? vel_L : 0.0f) + 10.0f) * dt_safe);
-    if (fabsf(dL) <= max_step_L) {
-      unwrap_L += dL;
-      prev_L = pos_L_raw;
-    }
-  }
+  if (dL >  M_PI) dL -= 2.0f * M_PI;
+  if (dL < -M_PI) dL += 2.0f * M_PI;
+  if (dR >  M_PI) dR -= 2.0f * M_PI;
+  if (dR < -M_PI) dR += 2.0f * M_PI;
 
-  if (posR_finite) {
-    float dR = pos_R_raw - prev_R;
-    while (dR >= PI)  dR -= two_pi;
-    while (dR < -PI)  dR += two_pi;
+  unwrap_L += dL;
+  unwrap_R += dR;
 
-    // Plausibility gate: reject one-sample position jumps.
-    const float max_step_R = fmaxf(0.20f, (fabsf(isfinite(vel_R) ? vel_R : 0.0f) + 10.0f) * dt_safe);
-    if (fabsf(dR) <= max_step_R) {
-      unwrap_R += dR;
-      prev_R = pos_R_raw;
-    }
-  }
+  prev_L = pos_L_raw;
+  prev_R = pos_R_raw;
 
   // Optional velocity low-pass filter (simple 1st-order)
   // Cutoff ~20 Hz at CONTROL_PERIOD
   const float fc    = 20.0f;
   const float RC    = 1.0f / (2.0f * PI * fc);
-  float alpha = dt_safe / (dt_safe + RC);
-  if (!isfinite(alpha) || alpha < 0.0f) alpha = 0.0f;
-  if (alpha > 1.0f) alpha = 1.0f;
+  const float alpha = dt / (dt + RC);
 
-  float vel_in_L = isfinite(vel_L) ? vel_L : vel_filt_L;
-  float vel_in_R = isfinite(vel_R) ? vel_R : vel_filt_R;
-
-  const float max_dv = 30.0f;
-  float dvL = vel_in_L - vel_filt_L;
-  float dvR = vel_in_R - vel_filt_R;
-  if (dvL > max_dv) vel_in_L = vel_filt_L + max_dv;
-  if (dvL < -max_dv) vel_in_L = vel_filt_L - max_dv;
-  if (dvR > max_dv) vel_in_R = vel_filt_R + max_dv;
-  if (dvR < -max_dv) vel_in_R = vel_filt_R - max_dv;
-
-  vel_filt_L += alpha * (vel_in_L - vel_filt_L);
-  vel_filt_R += alpha * (vel_in_R - vel_filt_R);
+  vel_filt_L += alpha * (vel_L - vel_filt_L);
+  vel_filt_R += alpha * (vel_R - vel_filt_R);
 
   // Forward position and velocity (average of two wheels)
   x_wheel = 0.5f * (unwrap_L + unwrap_R);
@@ -240,7 +149,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     canPackFloat(0.0f, msgL.buf + 4);
     canPackFloat(0.0f, msgR.buf);
     canPackFloat(0.0f, msgR.buf + 4);
-#ifdef SEND_TORQUE
+#if SEND_TORQUE
     can.write(msgL);
     can.write(msgR);
 #endif 
@@ -255,7 +164,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     logIndex    = 0;
     start_time  = micros();
 
-
     Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance mode started\"}");
   }
 
@@ -264,8 +172,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   // ---------------- Sensor feedback ----------------
   // Body angle and rate from IMU (radians and rad/s)
-
-  float theta     = sup->imu.pitch_rad - sup->balance_theta_target_rad;
+  float theta     = sup->imu.pitch_rad - THETA_EQ;
   float theta_dot = sup->imu.pitch_rate;
   pitch_rate_rms.push(sup->imu.pitch_rate); 
   rate_rms_raw.push(sup->imu.pitch_rate_raw);
@@ -302,11 +209,12 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     canPackFloat(0.0f, msgR.buf);
     canPackFloat(0.0f, msgR.buf + 4);
 
-    #ifdef SEND_TORQUE
+#if SEND_TORQUE
     can.write(msgL);
     can.write(msgR);
-    #endif
-    
+#endif
+    Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance aborted: tilt too large\"}");
+
     sup->mode = SUP_MODE_IDLE;
     first_entry = true;
     unwrap_init = false;
@@ -327,10 +235,9 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   if (u > TORQUE_CLAMP)  u = TORQUE_CLAMP;
   if (u < -TORQUE_CLAMP) u = -TORQUE_CLAMP;
 
-  // ESC torque directions are mirrored.
-  // Using opposite-sign commands produces same physical wheel torque (forward/back).
-  float torque_left  =  -u;
-  float torque_right = u;
+  // Symmetric torque to both wheels (signs match ESC expectations)
+  float torque_left  =  u;
+  float torque_right = -u;
 
   // ---------------- Send torque over CAN ----------------
   CAN_message_t msgL, msgR;
@@ -347,7 +254,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   canPackFloat(torque_right, msgR.buf);
   canPackFloat(0.0f,         msgR.buf + 4);
 
-#ifdef SEND_TORQUE
+#if SEND_TORQUE
   can.write(msgL);
   can.write(msgR);
 #endif
@@ -360,7 +267,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
     uint32_t age_us = micros() - sup->imu.last_update_us;
 		    
-    #ifdef SEND_TELEMETRY
     Serial.printf(
 		  "{\"t\":%lu,"
 		  "\"pitch\":%.3f,"
@@ -383,7 +289,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 		  sup->timing.exec_time_us,
 		  sup->timing.overruns
 		  );
-    #endif
 
     // reset window (so this RMS corresponds to the last ~0.1s at 10Hz printing)
     pitch_rate_rms.reset();
@@ -391,7 +296,6 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     rate_rms_filt.reset();
   }
 
-  #ifdef SEND_LOG
   // ---------------- Logging ----------------
   if (logIndex < LOGLEN) {
     logBuffer[logIndex++] = {
@@ -407,10 +311,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   // ---------------- Optional timed exit ----------------
   // Currently disabled (as you had it).
-
-  if (elapsed > sup->user_total_us ) {
+  if (elapsed > sup->user_total_us && false) {
     Serial.println("{\"samples\":[");
-
     for (int i = 0; i < logIndex; i++) {
       Serial.printf(
 		    "{\"t\":%lu,\"uL\":%.4f,\"uR\":%.4f,"
@@ -432,6 +334,4 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     first_entry = true;
     unwrap_init = false;
   }
-  #endif
-
 }
