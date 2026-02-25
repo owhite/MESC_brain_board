@@ -1001,12 +1001,6 @@
 		(uuid "83452e7e-19c6-48d2-8eb2-4ce8abc64900")
 	)
 	(junction
-		(at 139.7 90.17)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "8837704f-6047-455e-8d1c-e9c37dafdc84")
-	)
-	(junction
 		(at 116.84 76.2)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -1030,6 +1024,10 @@
 		(color 0 0 0 0)
 		(uuid "f1b96793-916a-4075-a5b8-2c0c1c71c401")
 	)
+	(no_connect
+		(at 161.29 78.74)
+		(uuid "c4d81ff0-09d2-4297-ad2b-2a2f3a021831")
+	)
 	(wire
 		(pts
 			(xy 96.52 71.12) (xy 93.98 71.12)
@@ -1039,16 +1037,6 @@
 			(type default)
 		)
 		(uuid "088e7a49-5d1c-4391-9cc0-beb8904a8f23")
-	)
-	(wire
-		(pts
-			(xy 161.29 78.74) (xy 167.64 78.74)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1223aeb6-50ed-42aa-b266-1a1dc314c5fa")
 	)
 	(wire
 		(pts
@@ -1089,16 +1077,6 @@
 			(type default)
 		)
 		(uuid "33ffbeef-2748-451b-b0f0-3088fade794f")
-	)
-	(wire
-		(pts
-			(xy 139.7 90.17) (xy 140.97 90.17)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4d2bba7a-c8a7-469c-abe6-cc309764b1f0")
 	)
 	(wire
 		(pts
@@ -1402,17 +1380,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 90.17) (xy 139.7 92.71)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "f797d842-829c-4349-a56f-dbfc860d43bf")
-	)
-	(wire
-		(pts
-			(xy 139.7 85.09) (xy 139.7 90.17)
+			(xy 139.7 85.09) (xy 139.7 92.71)
 		)
 		(stroke
 			(width 0)
@@ -1429,28 +1397,6 @@
 			(type default)
 		)
 		(uuid "fcf31dc9-4c41-4d81-a97a-bb31cfb44991")
-	)
-	(global_label "CAN_CM_BIAS"
-		(shape input)
-		(at 140.97 90.17 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "001ff1b0-234d-451c-b8be-a5dde3a51dc7")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 156.4738 90.17 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
 	)
 	(global_label "+3.3V"
 		(shape input)
@@ -1602,28 +1548,6 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
-				(hide yes)
-			)
-		)
-	)
-	(global_label "CAN_CM_BIAS"
-		(shape input)
-		(at 167.64 78.74 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "988f20dd-0159-4f83-a847-29fe39d47497")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 183.1438 78.74 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 				(hide yes)
 			)
 		)
