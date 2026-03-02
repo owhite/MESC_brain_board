@@ -4109,6 +4109,17 @@
 		)
 		(uuid "b7796eab-c3b9-45e9-adbb-fd07c7fc2f98")
 	)
+	(text "Speaker driver\n• Gate driven low-side logic MOSFET\n• Drain = speaker node, Source = GND, Gate = control signal\n• TBD: use a pull-down on gate prevent noise at boot up"
+		(exclude_from_sim no)
+		(at 43.18 84.074 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "d6151194-4963-4093-b848-ccdccb7ab3c5")
+	)
 	(text "CAN"
 		(exclude_from_sim no)
 		(at 37.846 40.132 90)
@@ -6239,7 +6250,7 @@
 				)
 			)
 		)
-		(property "Value" "LED GRN"
+		(property "Value" "APT1608SGC"
 			(at 50.8 142.24 0)
 			(effects
 				(font
@@ -6274,7 +6285,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C72043"
+		(property "LCSC" "APT1608SGC"
 			(at 52.07 146.05 0)
 			(effects
 				(font
@@ -6486,7 +6497,7 @@
 				(hide yes)
 			)
 		)
-		(property "Description" ""
+		(property "Description" "DEV-15583"
 			(at 151.13 55.88 0)
 			(effects
 				(font
@@ -6763,7 +6774,7 @@
 				(hide yes)
 			)
 		)
-		(property "Value" "my_BC337"
+		(property "Value" "SI2302DDS-T1-BE3"
 			(at 63.754 73.406 0)
 			(effects
 				(font
@@ -6783,7 +6794,7 @@
 				(hide yes)
 			)
 		)
-		(property "Datasheet" "https://diotec.com/tl_files/diotec/files/pdf/datasheets/bc337.pdf"
+		(property "Datasheet" "https://www.vishay.com/doc?63653"
 			(at 68.58 71.12 0)
 			(effects
 				(font
@@ -6793,7 +6804,7 @@
 				(hide yes)
 			)
 		)
-		(property "Description" "0.8A Ic, 45V Vce, NPN Transistor, TO-92"
+		(property "Description" "High drive current and efficiency SOT-23 MOSFET"
 			(at 68.58 71.12 0)
 			(effects
 				(font
@@ -6939,7 +6950,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C2286"
+		(property "LCSC" "APT1608SURCK"
 			(at 34.29 146.05 0)
 			(effects
 				(font
@@ -8370,7 +8381,7 @@
 				)
 			)
 		)
-		(property "Value" "TL3342F160QG"
+		(property "Value" "TL1015AF160QG"
 			(at 194.31 36.83 0)
 			(effects
 				(font
@@ -8416,7 +8427,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C318884"
+		(property "LCSC" ""
 			(at 204.47 36.83 0)
 			(effects
 				(font

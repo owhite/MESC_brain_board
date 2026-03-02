@@ -4918,7 +4918,7 @@
 		(descr "SOT, 3 Pin (JEDEC TO-236 Var AB https://www.jedec.org/document_search?search_api_views_fulltext=TO-236), generated with kicad-footprint-generator ipc_gullwing_generator.py")
 		(tags "SOT TO_SOT_SMD")
 		(property "Reference" "Q1"
-			(at 0.402456 -2.681369 0)
+			(at -0.097544 -3.506369 0)
 			(layer "F.SilkS")
 			(uuid "49124966-6f26-4cf1-90d4-8231bab2d747")
 			(effects
@@ -9520,7 +9520,7 @@
 		(descr "SOIC, 8 Pin (JEDEC MS-012AA, https://www.analog.com/media/en/package-pcb-resources/package/pkg_pdf/soic_narrow-r/r_8.pdf), generated with kicad-footprint-generator ipc_gullwing_generator.py")
 		(tags "SOIC SO")
 		(property "Reference" "U22"
-			(at 0 0 180)
+			(at 0 0 0)
 			(layer "F.SilkS")
 			(uuid "be98144c-9830-46e2-876d-61f7d42e8b67")
 			(effects

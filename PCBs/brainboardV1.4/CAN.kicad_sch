@@ -960,7 +960,7 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "CAN NODE DESIGN NOTES - TEENSY 4.0 + TCAN332G\n• 3.3 V CAN transceiver w/ standby (TCAN332G)\n• VCC = 3.3 V with local 0.1 µF decoupling at device\n• TXD pull-up to 3.3 V (10k) → recessive during MCU reset\n• STB pull-up to 3.3 V (10k) → default standby; MCU drives LOW after FlexCAN init\n• Direct MCU interface: TXD↔CAN_TX, RXD↔CAN_RX (no level shifting)\n• VREF not used (leave NC)\n• Split termination 2, 60Ω termination only at physical bus ends\n• CAN TVS (SM24CANB-02) at connector; hot plug protection"
+	(text "CAN NODE DESIGN NOTES - TEENSY 4.0 + TCAN334G\n• 3.3 V CAN transceiver w/ standby (TCAN334G must be used)\n• VCC = 3.3 V with local 0.1 µF decoupling at device\n• TXD pull-up to 3.3 V (10k) → recessive during MCU reset\n• STB pull-up to 3.3 V (10k) → default standby; MCU drives LOW after FlexCAN init\n• Direct MCU interface: TXD↔CAN_TX, RXD↔CAN_RX (no level shifting)\n• VREF not used (leave NC)\n• Split termination 2, 60Ω termination only at physical bus ends\n• CAN TVS (SM24CANB-02) at connector; hot plug protection"
 		(exclude_from_sim no)
 		(at 116.586 115.57 0)
 		(effects
@@ -2261,7 +2261,7 @@
 				(hide yes)
 			)
 		)
-		(property "Datasheet" "https://www.mouser.com/ProductDetail/TDK/C2012X7R2A104K125AA?qs=NRhsANhppD9J0ZsT2%2Fo%2F7Q%3D%3D"
+		(property "Datasheet" ""
 			(at 139.7 96.52 0)
 			(effects
 				(font
@@ -2279,7 +2279,7 @@
 				(hide yes)
 			)
 		)
-		(property "P/N" "810-C2012X7R2A104K"
+		(property "P/N" "CC0603JRNPO9BN472"
 			(at 139.7 96.52 0)
 			(effects
 				(font
@@ -2465,7 +2465,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "TCAN332GDCNT"
+		(property "Value" "TCAN334GDR"
 			(at 164.338 61.468 0)
 			(effects
 				(font

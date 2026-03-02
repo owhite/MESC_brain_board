@@ -1975,7 +1975,7 @@
 		(dnp no)
 		(uuid "6d60f06a-fbd2-40f4-8de9-f90d833bed83")
 		(property "Reference" "20k_31"
-			(at 199.39 83.185 0)
+			(at 203.708 83.312 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2666,7 +2666,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C72041"
+		(property "LCSC" "APT1608QBC/D"
 			(at 190.5 76.2 0)
 			(effects
 				(font
