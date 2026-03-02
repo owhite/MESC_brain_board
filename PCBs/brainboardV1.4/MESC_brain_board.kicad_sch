@@ -6753,7 +6753,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "28a5d9e1-d938-475b-8c09-aa34bc5ae65a")
-		(property "Reference" "Q21"
+		(property "Reference" "Q1"
 			(at 63.5 69.8499 0)
 			(effects
 				(font
@@ -6814,7 +6814,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a"
-					(reference "Q21")
+					(reference "Q1")
 					(unit 1)
 				)
 			)

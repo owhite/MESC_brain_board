@@ -18,10 +18,13 @@
       "problemMatcher": []
     },
     {
-      "label": "PlatformIO Upload",
+      "label": "PlatformIO Upload (No Button)",
       "type": "shell",
-      "command": "/Users/owhite/.platformio/penv/bin/platformio",
-      "args": ["run", "-e", "teensy40", "-t", "upload"],
+      "command": "bash",
+      "args": [
+        "-lc",
+        "TEENSY_REBOOT=/Users/owhite/.platformio/packages/tool-teensy/teensy_reboot; if [ -x \"$TEENSY_REBOOT\" ]; then \"$TEENSY_REBOOT\" || true; fi; /Users/owhite/.platformio/penv/bin/platformio run -e teensy40 -t upload"
+      ],
       "isBackground": false,
       "group": "build",
       "presentation": {

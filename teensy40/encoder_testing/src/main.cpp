@@ -74,7 +74,9 @@ void setup() {
 void loop() {
   // -------- HIGH PRIORITY --------
   // Set to CONTROL_PERIOD_US = 1000 µs (1000 Hz).
-  //   note that is faster than rate of CAN coming from MESC
+  // NOTE: ESC POSVEL over CAN is expected around 500 Hz (about every 2 ms),
+  // while this control loop runs at 1 kHz (every 1 ms). They are intentionally
+  // asynchronous, so many control ticks will reuse the latest POSVEL sample.
   // The system uses an ISR-driven scheduler to tell the main loop to go into controlLoop. 
   // ---
   if (g_control_due) {
@@ -116,7 +118,8 @@ void loop() {
       tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
     }
     else if (pb_state == PB_RELEASED) {
-      SupervisorMode test_mode = SUP_MODE_TEST_CAN;
+      // SupervisorMode test_mode = SUP_MODE_TEST_CAN;
+      SupervisorMode test_mode = SUP_MODE_BALANCE_TWR;
       if (supervisor.mode == test_mode) {
         Serial.println("button: test_can mode already active; ignoring");
       } else {
@@ -149,6 +152,55 @@ void loop() {
         Serial.println("unwrap dump: done");
         dump_started_printed = false;
       }
+    }
+
+    // Live CAN RX health for ESP32/python during balance.
+    static uint32_t last_can_diag_us = 0;
+    if (supervisor.mode == SUP_MODE_BALANCE_TWR &&
+        (uint32_t)(now_us - last_can_diag_us) >= 1000000u) {
+      last_can_diag_us = now_us;
+
+      PosvelRxStats left{};
+      PosvelRxStats right{};
+      const uint8_t left_id = supervisor.esc[0].config.node_id;
+      const uint8_t right_id = supervisor.esc[1].config.node_id;
+      const bool have_left = canGetPosvelRxStats(left_id, left);
+      const bool have_right = canGetPosvelRxStats(right_id, right);
+
+      const uint32_t left_age_us =
+          (have_left && left.last_rx_us > 0u) ? (uint32_t)(now_us - left.last_rx_us) : UINT32_MAX;
+      const uint32_t right_age_us =
+          (have_right && right.last_rx_us > 0u) ? (uint32_t)(now_us - right.last_rx_us) : UINT32_MAX;
+      const uint32_t left_avg_gap_us =
+          (have_left && left.gap_count > 0u) ? (uint32_t)(left.sum_gap_us / left.gap_count) : 0u;
+      const uint32_t right_avg_gap_us =
+          (have_right && right.gap_count > 0u) ? (uint32_t)(right.sum_gap_us / right.gap_count) : 0u;
+      const uint32_t left_min_gap_us =
+          (have_left && left.gap_count > 0u) ? left.min_gap_us : 0u;
+      const uint32_t right_min_gap_us =
+          (have_right && right.gap_count > 0u) ? right.min_gap_us : 0u;
+
+      Serial1.printf(
+          "{\"cmd\":\"CAN_POSVEL_RX\",\"t\":%lu,"
+          "\"left_id\":%u,\"left_count\":%lu,\"left_age_us\":%lu,"
+          "\"left_avg_gap_us\":%lu,\"left_min_gap_us\":%lu,\"left_max_gap_us\":%lu,\"left_est_missed\":%lu,"
+          "\"right_id\":%u,\"right_count\":%lu,\"right_age_us\":%lu,"
+          "\"right_avg_gap_us\":%lu,\"right_min_gap_us\":%lu,\"right_max_gap_us\":%lu,\"right_est_missed\":%lu}\n",
+          (unsigned long)now_us,
+          left_id,
+          (unsigned long)(have_left ? left.count : 0u),
+          (unsigned long)left_age_us,
+          (unsigned long)left_avg_gap_us,
+          (unsigned long)left_min_gap_us,
+          (unsigned long)(have_left ? left.max_gap_us : 0u),
+          (unsigned long)(have_left ? left.est_missed : 0u),
+          right_id,
+          (unsigned long)(have_right ? right.count : 0u),
+          (unsigned long)right_age_us,
+          (unsigned long)right_avg_gap_us,
+          (unsigned long)right_min_gap_us,
+          (unsigned long)(have_right ? right.max_gap_us : 0u),
+          (unsigned long)(have_right ? right.est_missed : 0u));
     }
   }
 

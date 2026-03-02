@@ -3,6 +3,8 @@
 #define INVERT_ESC_ENCODER  0
 
 static volatile uint32_t g_last_posvel_rx_us = 0;
+static PosvelRxStats g_posvel_stats[ESC_LOOKUP_SIZE];
+static constexpr uint32_t POSVEL_EXPECTED_PERIOD_US = 2000u;
 
 bool canBufferPush(CANBuffer &cb, const CAN_message_t &msg) {
     int next = (cb.head + 1) % CAN_BUF_SIZE;
@@ -61,6 +63,12 @@ uint32_t canGetLastPosVelRxUs() {
     return g_last_posvel_rx_us;
 }
 
+bool canGetPosvelRxStats(uint8_t node_id, PosvelRxStats &out) {
+    if (node_id >= ESC_LOOKUP_SIZE) return false;
+    out = g_posvel_stats[node_id];
+    return true;
+}
+
 void handleCANMessage(const CAN_message_t &msg) {
     uint16_t msg_type = extractMsgType(msg.id);
     uint8_t sender_id = extractSender(msg.id);   // ESC ID
@@ -81,7 +89,24 @@ void handleCANMessage(const CAN_message_t &msg) {
 	    float pos, vel;
 	    memcpy(&pos, &msg.buf[0], sizeof(float));
 	    memcpy(&vel, &msg.buf[4], sizeof(float));
-            g_last_posvel_rx_us = micros();
+            const uint32_t now_us = micros();
+            PosvelRxStats &st = g_posvel_stats[sender_id];
+            if (st.last_rx_us != 0u) {
+              const uint32_t gap_us = (uint32_t)(now_us - st.last_rx_us);
+              if (gap_us < st.min_gap_us) st.min_gap_us = gap_us;
+              if (gap_us > st.max_gap_us) st.max_gap_us = gap_us;
+              st.sum_gap_us += gap_us;
+              st.gap_count++;
+
+              // Approximate missed frames based on expected 500 Hz cadence.
+              if (gap_us > (POSVEL_EXPECTED_PERIOD_US + POSVEL_EXPECTED_PERIOD_US / 2u)) {
+                const uint32_t periods = (gap_us + POSVEL_EXPECTED_PERIOD_US / 2u) / POSVEL_EXPECTED_PERIOD_US;
+                if (periods > 1u) st.est_missed += (periods - 1u);
+              }
+            }
+            st.last_rx_us = now_us;
+            st.count++;
+            g_last_posvel_rx_us = now_us;
 #if INVERT_ESC_ENCODER
 	    esc->state.pos_rad   = TWO_PI - pos;  // mirror around 2π
 	    esc->state.vel_rad_s = -vel;          // flip velocity sign
@@ -90,6 +115,8 @@ void handleCANMessage(const CAN_message_t &msg) {
 	    esc->state.vel_rad_s = vel;
 #endif
 	    esc->state.alive     = true;
+            esc->status.last_update_us = now_us;
+            esc->status.alive = true;
 	    // Serial.printf("{\"cmd\": \"PRINT\", \"note\": \"Torque response received CAN\"}\n");
 
 	    // Serial.printf("[CAN RX] POSVEL sender=%u pos=%.3f rad vel=%.3f rad/s\r\n", sender_id, pos, vel);

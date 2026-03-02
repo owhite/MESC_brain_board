@@ -17,6 +17,16 @@ struct CANBuffer {
     bool link_ok = false;
 };
 
+struct PosvelRxStats {
+  uint32_t count = 0;
+  uint32_t last_rx_us = 0;
+  uint32_t min_gap_us = UINT32_MAX;
+  uint32_t max_gap_us = 0;
+  uint64_t sum_gap_us = 0;
+  uint32_t gap_count = 0;
+  uint32_t est_missed = 0;
+};
+
 bool canBufferPush(CANBuffer &cb, const CAN_message_t &msg);
 bool canBufferPop(CANBuffer &cb, CAN_message_t &msg);
 
@@ -27,6 +37,7 @@ float extractFloat(const uint8_t *buf);
 uint32_t canMakeExtId(uint16_t msg_id, uint8_t sender, uint8_t receiver);
 void canPackFloat(float val, uint8_t *buf);
 uint32_t canGetLastPosVelRxUs();
+bool canGetPosvelRxStats(uint8_t node_id, PosvelRxStats &out);
 
 void handleCANMessage(const CAN_message_t &msg);
 

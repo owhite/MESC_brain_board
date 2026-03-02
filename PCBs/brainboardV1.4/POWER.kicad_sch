@@ -1974,7 +1974,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "6d60f06a-fbd2-40f4-8de9-f90d833bed83")
-		(property "Reference" "20k_22"
+		(property "Reference" "20k_31"
 			(at 199.39 83.185 0)
 			(effects
 				(font
@@ -2037,7 +2037,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "20k_22")
+					(reference "20k_31")
 					(unit 1)
 				)
 			)
@@ -2052,7 +2052,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "767af871-6b9e-4fe1-8510-8409582a3208")
-		(property "Reference" "C24"
+		(property "Reference" "C33"
 			(at 162.56 80.01 0)
 			(effects
 				(font
@@ -2133,7 +2133,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "C24")
+					(reference "C33")
 					(unit 1)
 				)
 			)
@@ -2217,8 +2217,8 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "a742f1de-be16-43d8-b5d7-07b0ae2a55b9")
-		(property "Reference" "C22"
-			(at 127 80.01 0)
+		(property "Reference" "C31"
+			(at 120.904 80.264 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2298,7 +2298,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "C22")
+					(reference "C31")
 					(unit 1)
 				)
 			)
@@ -2448,7 +2448,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "db2f5f5b-7ae7-4cfc-9e66-4313115e55c5")
-		(property "Reference" "C23"
+		(property "Reference" "C32"
 			(at 154.94 80.01 0)
 			(effects
 				(font
@@ -2529,7 +2529,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "C23")
+					(reference "C32")
 					(unit 1)
 				)
 			)
@@ -2544,7 +2544,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "dcd9c333-2136-41e6-9da8-56675d42f4f3")
-		(property "Reference" "C25"
+		(property "Reference" "C34"
 			(at 184.785 79.248 0)
 			(effects
 				(font
@@ -2608,7 +2608,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "C25")
+					(reference "C34")
 					(unit 1)
 				)
 			)
@@ -2623,7 +2623,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "e102212d-6417-4aef-b63e-6ccef6e5fabb")
-		(property "Reference" "D_BLU21"
+		(property "Reference" "D_BLU31"
 			(at 191.77 69.85 0)
 			(effects
 				(font
@@ -2684,7 +2684,7 @@
 		(instances
 			(project "MESC_brain_board"
 				(path "/8920b97c-b80b-47c5-aaa4-fe68c48cd11a/165c0a2c-8484-48b2-be46-c9f57520b95f"
-					(reference "D_BLU21")
+					(reference "D_BLU31")
 					(unit 1)
 				)
 			)

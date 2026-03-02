@@ -12,13 +12,10 @@
             "type": "pwa-node",
             "request": "launch",
             "name": "Compile/Upload",
-            "runtimeExecutable": "/Users/owhite/.platformio/penv/bin/platformio",
+            "runtimeExecutable": "bash",
             "args": [
-                "run",
-                "-e",
-                "teensy40",
-                "-t",
-                "upload"
+                "-lc",
+                "TEENSY_REBOOT=/Users/owhite/.platformio/packages/tool-teensy/teensy_reboot; if [ -x \"$TEENSY_REBOOT\" ]; then \"$TEENSY_REBOOT\" || true; fi; /Users/owhite/.platformio/penv/bin/platformio run -e teensy40 -t upload"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",

@@ -13,11 +13,20 @@
 struct UnwrapDebugTick {
   float dL_wrapped = 0.0f;
   float dR_wrapped = 0.0f;
+  float max_step_L = 0.0f;
+  float max_step_R = 0.0f;
+  float dt_gate_s = 0.0f;
+  float dt_gate_L_s = 0.0f;
+  float dt_gate_R_s = 0.0f;
+  float v_meas_from_pos_m_s = 0.0f;
   bool posL_finite = false;
   bool posR_finite = false;
   bool accept_L = false;
   bool accept_R = false;
   bool unwrap_init_event = false;
+  bool new_pos_sample = false;
+  bool new_pos_L = false;
+  bool new_pos_R = false;
 };
 
 // ---------------- Logging ----------------
@@ -353,11 +362,16 @@ static float prev_L = 0.0f, prev_R = 0.0f;
 static float unwrap_L = 0.0f, unwrap_R = 0.0f;
 
 // Velocity filtering state
-static float vel_filt_L = 0.0f;
-static float vel_filt_R = 0.0f;
+static float x_wheel_state_m = 0.0f;
+static float x_dot_state_m_s = 0.0f;
+static float prev_x_unwrap_m = 0.0f;
+static bool  prev_x_unwrap_valid = false;
+static uint32_t last_posvel_rx_used_L_us = 0;
+static uint32_t last_posvel_rx_used_R_us = 0;
 
 // One-shot per entry
 static bool first_entry = true;
+static uint32_t start_time_us = 0;
 
 struct RunningStats {
   uint32_t n = 0;
@@ -389,60 +403,27 @@ struct CanTxProofStats {
 };
 static CanTxProofStats g_can_tx_proof;
 
-/* 
-POTENTIAL ISSUES:
-
-*) SEE ALSO: system_assumptions.md
-
-*) Using filtered velocity for x_dot but unwrapped angle for x_wheel
-That’s not “wrong,” but note the implication:
-x_wheel is derived from position integration (unwrap)
-x_dot is derived from (filtered) ESC-reported velocity, not the derivative of x_wheel
-So position and velocity can become slightly inconsistent (especially if ESC velocity has bias or filtering). If you use both in LQR, that’s usually okay, but if you ever see weird state mismatch, this is a candidate.
-A possible fix is x_dot = (x_wheel - x_wheel_prev)/dt (and optionally filter that),
-
-*) dt 
-Unlike some code where dt only scales a constant, here dt directly affects alpha, so if your real loop jitters, your filter cutoff jitters too.
-At small jitter it’s fine. If you ever see weird filtering, you can:
-feed dt from your measured dt_us (instead of constant), or
-clamp dt to a sane range before using it in the filter (like you already do elsewhere for IMU dt)
-
-*) Initialization
-unwrap_init, prev_L, prev_R, unwrap_L, unwrap_R, vel_filt_L, vel_filt_R
-They must be static or otherwise persistent across calls and must be reset when you exit balance mode (you are resetting unwrap_init=false in your mode exit paths—good).
-
-*) WHEEL_RADIUS_M scaling
-Correct conceptually (rad → meters), but note: x_wheel is now linear distance (m), while your controller gain vector K_disc must match this scaling. Just keep that consistent.
-
-*) Limit maximum angle before shutting off
-
-Add cutoff at ±45 deg.
-
-*) Add angle offset calibration
-
-*) Add theta_offset and subtract from roll.
-
-*) Add roll-rate deadband and startup ramp
-
-*) Timing / Supervisor Infrastructure
-A. Confirm supervisor uses radians. 
-B. Signature mismatch fixed. 
-C. Tune
-
-*/ 
-
-
-
 // ---------------- Helper: update continuous wheel angles ----------------
 
 static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
                               float &x_wheel, float &x_dot,
                               float vel_L, float vel_R,
-                              float dt,
+                              bool new_pos_L,
+                              bool new_pos_R,
+                              float dt_pos_L_s,
+                              float dt_pos_R_s,
+                              float dt_loop_s,
                               UnwrapDebugTick *dbg = nullptr)
 {
   const float two_pi = 2.0f * PI;
-  const float dt_safe = (isfinite(dt) && dt > 0.0f) ? dt : (CONTROL_PERIOD_US * 1e-6f);
+  const float dt_loop_safe = (isfinite(dt_loop_s) && dt_loop_s > 0.0f) ? dt_loop_s : (CONTROL_PERIOD_US * 1e-6f);
+  const float dt_gate_L = (isfinite(dt_pos_L_s) && dt_pos_L_s > 0.0f) ? dt_pos_L_s : dt_loop_safe;
+  const float dt_gate_R = (isfinite(dt_pos_R_s) && dt_pos_R_s > 0.0f) ? dt_pos_R_s : dt_loop_safe;
+  const bool new_pos_sample = new_pos_L || new_pos_R;
+  constexpr float STEP_MARGIN_RAD = 0.03f;
+  constexpr float STEP_MIN_RAD = 0.01f;
+  constexpr float STEP_MAX_RAD = 0.60f;
+  constexpr float VEL_TAU_S = 0.02f;
 
   // Reject non-finite position samples entirely for this tick.
   const bool posL_finite = isfinite(pos_L_raw);
@@ -451,13 +432,20 @@ static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
     *dbg = UnwrapDebugTick{};
     dbg->posL_finite = posL_finite;
     dbg->posR_finite = posR_finite;
+    dbg->new_pos_sample = new_pos_sample;
+    dbg->new_pos_L = new_pos_L;
+    dbg->new_pos_R = new_pos_R;
+    dbg->dt_gate_L_s = dt_gate_L;
+    dbg->dt_gate_R_s = dt_gate_R;
+    dbg->dt_gate_s = (new_pos_L && new_pos_R) ? (0.5f * (dt_gate_L + dt_gate_R))
+                                               : (new_pos_L ? dt_gate_L : (new_pos_R ? dt_gate_R : dt_loop_safe));
   }
 
   // Initialize unwrap on first call in this mode
   if (!unwrap_init) {
     if (!posL_finite || !posR_finite) {
-      x_wheel = 0.0f;
-      x_dot   = 0.0f;
+      x_wheel = x_wheel_state_m;
+      x_dot = x_dot_state_m_s;
       return;
     }
 
@@ -465,82 +453,79 @@ static void updateWheelUnwrap(float pos_L_raw, float pos_R_raw,
     prev_R = pos_R_raw;
     unwrap_L = 0.0f;
     unwrap_R = 0.0f;
-    vel_filt_L = isfinite(vel_L) ? vel_L : 0.0f;
-    vel_filt_R = isfinite(vel_R) ? vel_R : 0.0f;
+    x_wheel_state_m = 0.0f;
+    x_dot_state_m_s = 0.0f;
+    prev_x_unwrap_m = 0.0f;
+    prev_x_unwrap_valid = false;
     unwrap_init = true;
     if (dbg) dbg->unwrap_init_event = true;
   }
 
-  // Compute incremental angles with wrap handling
-  if (posL_finite) {
-    float dL = pos_L_raw - prev_L;
-    while (dL >= PI)  dL -= two_pi;
-    while (dL < -PI)  dL += two_pi;
-    if (dbg) dbg->dL_wrapped = dL;
+  if (new_pos_sample) {
+    // Compute incremental angles with wrap handling only on fresh POSVEL samples.
+    if (new_pos_L && posL_finite) {
+      float dL = pos_L_raw - prev_L;
+      while (dL >= PI) dL -= two_pi;
+      while (dL < -PI) dL += two_pi;
+      if (dbg) dbg->dL_wrapped = dL;
 
-    // Plausibility gate: reject one-sample position jumps.
-    const float velL = isfinite(vel_L) ? vel_L : 0.0f;
-    const float max_step_L = (fabsf(velL) + 5.0f) * dt_safe;   // margin = 5 rad/s
+      float max_step_L = fabsf(vel_L) * dt_gate_L + STEP_MARGIN_RAD;
+      if (max_step_L < STEP_MIN_RAD) max_step_L = STEP_MIN_RAD;
+      if (max_step_L > STEP_MAX_RAD) max_step_L = STEP_MAX_RAD;
+      if (dbg) dbg->max_step_L = max_step_L;
 
-    if (fabsf(dL) <= max_step_L) {
-    unwrap_L += dL;
-    prev_L = pos_L_raw;
-    if (dbg) dbg->accept_L = true;
-    }   
-    else {
-      // optional: consider still updating prev_L to avoid "stair step" after rejects
-      // prev_L = pos_L_raw;
+      if (fabsf(dL) <= max_step_L) {
+        unwrap_L += dL;
+        if (dbg) dbg->accept_L = true;
+      }
+      // Advance prev on both accept and reject to avoid lockout cascades.
+      prev_L = pos_L_raw;
     }
-  }
-  if (posR_finite) {
-    float dR = pos_R_raw - prev_R;
-    while (dR >= PI)  dR -= two_pi;
-    while (dR < -PI)  dR += two_pi;
-    if (dbg) dbg->dR_wrapped = dR;
 
-    // Plausibility gate: reject one-sample position jumps.
-    const float velR = isfinite(vel_R) ? vel_R : 0.0f;
-    const float max_step_R = (fabsf(velR) + 5.0f) * dt_safe;   // margin = 5 rad/s
+    if (new_pos_R && posR_finite) {
+      float dR = pos_R_raw - prev_R;
+      while (dR >= PI) dR -= two_pi;
+      while (dR < -PI) dR += two_pi;
+      if (dbg) dbg->dR_wrapped = dR;
 
-    if (fabsf(dR) <= max_step_R) {
-      unwrap_R += dR;
+      float max_step_R = fabsf(vel_R) * dt_gate_R + STEP_MARGIN_RAD;
+      if (max_step_R < STEP_MIN_RAD) max_step_R = STEP_MIN_RAD;
+      if (max_step_R > STEP_MAX_RAD) max_step_R = STEP_MAX_RAD;
+      if (dbg) dbg->max_step_R = max_step_R;
+
+      if (fabsf(dR) <= max_step_R) {
+        unwrap_R += dR;
+        if (dbg) dbg->accept_R = true;
+      }
+      // Advance prev on both accept and reject to avoid lockout cascades.
       prev_R = pos_R_raw;
-      if (dbg) dbg->accept_R = true;
-    } 
-    else {
-      // optional: consider still updating prev_R to avoid "stair step" after rejects
-      // prev_R = pos_R_raw;
     }
+
+    const float x_unwrap_m = 0.5f * (unwrap_L + unwrap_R) * WHEEL_RADIUS_M;
+    float v_meas = x_dot_state_m_s;
+    const float dt_for_v =
+        (new_pos_L && new_pos_R) ? (0.5f * (dt_gate_L + dt_gate_R))
+                                 : (new_pos_L ? dt_gate_L : dt_gate_R);
+    if (prev_x_unwrap_valid && dt_for_v > 0.0f) {
+      v_meas = (x_unwrap_m - prev_x_unwrap_m) / dt_for_v;
+    }
+
+    float alpha = dt_for_v / (VEL_TAU_S + dt_for_v);
+    if (!isfinite(alpha) || alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+
+    x_dot_state_m_s += alpha * (v_meas - x_dot_state_m_s);
+    x_wheel_state_m = x_unwrap_m;
+    prev_x_unwrap_m = x_unwrap_m;
+    prev_x_unwrap_valid = true;
+    if (dbg) dbg->v_meas_from_pos_m_s = v_meas;
+  } else {
+    // No fresh POS sample this tick: predict position forward with filtered velocity.
+    x_wheel_state_m += x_dot_state_m_s * dt_loop_safe;
   }
 
-  // Optional velocity low-pass filter (simple 1st-order)
-  // Cutoff ~20 Hz at CONTROL_PERIOD
-  const float fc    = 20.0f;
-  const float RC    = 1.0f / (2.0f * PI * fc);
-  float alpha = dt_safe / (dt_safe + RC);
-  if (!isfinite(alpha) || alpha < 0.0f) alpha = 0.0f;
-  if (alpha > 1.0f) alpha = 1.0f;
-
-  float vel_in_L = isfinite(vel_L) ? vel_L : vel_filt_L;
-  float vel_in_R = isfinite(vel_R) ? vel_R : vel_filt_R;
-
-  const float max_dv = 30.0f;
-  float dvL = vel_in_L - vel_filt_L;
-  float dvR = vel_in_R - vel_filt_R;
-  if (dvL > max_dv) vel_in_L = vel_filt_L + max_dv;
-  if (dvL < -max_dv) vel_in_L = vel_filt_L - max_dv;
-  if (dvR > max_dv) vel_in_R = vel_filt_R + max_dv;
-  if (dvR < -max_dv) vel_in_R = vel_filt_R - max_dv;
-
-  vel_filt_L += alpha * (vel_in_L - vel_filt_L);
-  vel_filt_R += alpha * (vel_in_R - vel_filt_R);
-
-  // Forward position and velocity (average of two wheels)
-  x_wheel = 0.5f * (unwrap_L + unwrap_R);
-  x_dot   = 0.5f * (vel_filt_L + vel_filt_R);
-
-  x_wheel *= WHEEL_RADIUS_M;
-  x_dot   *= WHEEL_RADIUS_M;
+  x_wheel = x_wheel_state_m;
+  x_dot = x_dot_state_m_s;
 }
 
 bool test_pin_state = true;
@@ -556,6 +541,12 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     // If either ESC died mid-balance, immediately go idle
     first_entry = true;
     unwrap_init = false;
+    x_wheel_state_m = 0.0f;
+    x_dot_state_m_s = 0.0f;
+    prev_x_unwrap_m = 0.0f;
+    prev_x_unwrap_valid = false;
+    last_posvel_rx_used_L_us = 0;
+    last_posvel_rx_used_R_us = 0;
 
     // Send zero torque
     CAN_message_t msgL, msgR;
@@ -584,15 +575,23 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     unwrap_init = false;
     g_can_tx_proof = CanTxProofStats{};
     g_can_tx_proof.last_report_us = micros();
+    start_time_us = micros();
+    x_wheel_state_m = 0.0f;
+    x_dot_state_m_s = 0.0f;
+    prev_x_unwrap_m = 0.0f;
+    prev_x_unwrap_valid = false;
+    last_posvel_rx_used_L_us = 0;
+    last_posvel_rx_used_R_us = 0;
     #ifdef SEND_LOG
     telemetry_reset_unwrap_log();
     #endif
-
 
     Serial.println("{\"cmd\":\"PRINT\",\"note\":\"Balance mode started\"}");
   }
 
   // ---------------- Sensor feedback ----------------
+  const uint32_t elapsed_us = micros() - start_time_us;
+
   // Body angle and rate from IMU (radians and rad/s)
 
   float theta     = sup->imu.pitch_rad - sup->balance_theta_target_rad;
@@ -608,16 +607,42 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   float vel_L = sup->esc[0].state.vel_rad_s;
   float vel_R = sup->esc[1].state.vel_rad_s;
 
-  // Control period DT (assumed constant; matches ISR period)
-  const float dt = CONTROL_PERIOD_US * 1e-6f;
+  // Control-loop tick and POS sample timing are independent.
+  const float dt_loop_s = CONTROL_PERIOD_US * 1e-6f;
+  const uint32_t pos_L_us = sup->esc[0].status.last_update_us;
+  const uint32_t pos_R_us = sup->esc[1].status.last_update_us;
+  const bool new_pos_L = (pos_L_us != 0u) && (pos_L_us != last_posvel_rx_used_L_us);
+  const bool new_pos_R = (pos_R_us != 0u) && (pos_R_us != last_posvel_rx_used_R_us);
+  float dt_pos_L_s = dt_loop_s;
+  float dt_pos_R_s = dt_loop_s;
+  if (new_pos_L) {
+    if (last_posvel_rx_used_L_us != 0u) {
+      dt_pos_L_s = (float)((uint32_t)(pos_L_us - last_posvel_rx_used_L_us)) * 1e-6f;
+    } else {
+      dt_pos_L_s = 0.002f;
+    }
+    last_posvel_rx_used_L_us = pos_L_us;
+  }
+  if (new_pos_R) {
+    if (last_posvel_rx_used_R_us != 0u) {
+      dt_pos_R_s = (float)((uint32_t)(pos_R_us - last_posvel_rx_used_R_us)) * 1e-6f;
+    } else {
+      dt_pos_R_s = 0.002f;
+    }
+    last_posvel_rx_used_R_us = pos_R_us;
+  }
 
   float x_wheel = 0.0f;
   float x_dot   = 0.0f;
   UnwrapDebugTick unwrap_dbg;
-  updateWheelUnwrap(pos_L, pos_R, x_wheel, x_dot, vel_L, vel_R, dt, &unwrap_dbg);
+  updateWheelUnwrap(pos_L, pos_R, x_wheel, x_dot, vel_L, vel_R,
+                    new_pos_L, new_pos_R, dt_pos_L_s, dt_pos_R_s, dt_loop_s, &unwrap_dbg);
 
   #ifdef SEND_LOG
-  telemetry_log_unwrap(pos_L, pos_R, vel_L, vel_R, unwrap_dbg, unwrap_L, unwrap_R, x_wheel, x_dot, dt);
+  if (unwrap_dbg.new_pos_sample) {
+    telemetry_log_unwrap(pos_L, pos_R, vel_L, vel_R, unwrap_dbg,
+                         unwrap_L, unwrap_R, x_wheel, x_dot, unwrap_dbg.dt_gate_s);
+  }
   #endif
 
   // digitalWrite(TEST_PIN, test_pin_state);
@@ -736,12 +761,39 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     float pitch_deg      = sup->imu.pitch_rad * 180.0f / PI;
     float pitch_rate_deg = sup->imu.pitch_rate * 180.0f / PI;
     uint32_t age_us = micros() - sup->imu.last_update_us;
-		    
+    const uint32_t loop_dt_us = sup->timing.dt_us;
+    const float loop_hz = (loop_dt_us > 0u) ? (1000000.0f / (float)loop_dt_us) : 0.0f;
+    const int32_t dt_err_from_500hz_us = (int32_t)loop_dt_us - 2000;  // 500 Hz target = 2000 us
+    const int dt_ok_500hz = (abs(dt_err_from_500hz_us) <= 200) ? 1 : 0; // +/-10% window
+			    
     #ifdef SEND_TELEMETRY
     Serial.printf(
 		  "{\"t\":%lu,"
 		  "\"pitch\":%.3f,"
 		  "\"rate\":%.3f,"
+		  "\"pos_L_raw\":%.6f,"
+		  "\"pos_R_raw\":%.6f,"
+		  "\"vel_L_raw\":%.6f,"
+		  "\"vel_R_raw\":%.6f,"
+		  "\"new_pos\":%d,"
+		  "\"new_pos_L\":%d,"
+		  "\"new_pos_R\":%d,"
+		  "\"dt_pos_us\":%lu,"
+		  "\"dt_pos_L_us\":%lu,"
+		  "\"dt_pos_R_us\":%lu,"
+		  "\"dL\":%.6f,"
+		  "\"dR\":%.6f,"
+		  "\"max_step_L\":%.6f,"
+		  "\"max_step_R\":%.6f,"
+		  "\"accept_L\":%d,"
+		  "\"accept_R\":%d,"
+		  "\"v_meas_pos\":%.6f,"
+		  "\"x_wheel\":%.6f,"
+		  "\"x_dot\":%.6f,"
+		  "\"loop_dt_us\":%lu,"
+		  "\"loop_hz\":%.2f,"
+		  "\"dt_err_500hz_us\":%ld,"
+		  "\"dt_ok_500hz\":%d,"
 		  "\"rms_raw\":%.6f,"
 		  "\"rms_filt\":%.6f,"
 		  "\"n_rms\":%lu,"
@@ -752,6 +804,29 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 		  micros(),
 		  sup->imu.pitch_rad * 180.0f / PI,
 		  sup->imu.pitch_rate * 180.0f / PI,
+		  pos_L,                         // ESC raw POSVEL position [rad]
+		  pos_R,                         // ESC raw POSVEL position [rad]
+		  vel_L,                         // ESC raw POSVEL velocity [rad/s]
+		  vel_R,                         // ESC raw POSVEL velocity [rad/s]
+		  unwrap_dbg.new_pos_sample ? 1 : 0,
+		  unwrap_dbg.new_pos_L ? 1 : 0,
+		  unwrap_dbg.new_pos_R ? 1 : 0,
+		  (unsigned long)lroundf(unwrap_dbg.dt_gate_s * 1e6f),
+		  (unsigned long)lroundf(unwrap_dbg.dt_gate_L_s * 1e6f),
+		  (unsigned long)lroundf(unwrap_dbg.dt_gate_R_s * 1e6f),
+		  unwrap_dbg.dL_wrapped,
+		  unwrap_dbg.dR_wrapped,
+		  unwrap_dbg.max_step_L,
+		  unwrap_dbg.max_step_R,
+		  unwrap_dbg.accept_L ? 1 : 0,
+		  unwrap_dbg.accept_R ? 1 : 0,
+		  unwrap_dbg.v_meas_from_pos_m_s,
+		  x_wheel,
+		  x_dot,
+		  (unsigned long)loop_dt_us,
+		  loop_hz,
+		  (long)dt_err_from_500hz_us,
+		  dt_ok_500hz,
 		  rate_rms_raw.stddev(),          // raw gyro RMS (rad/s)
 		  rate_rms_filt.stddev(),         // filtered RMS (rad/s)
 		  (unsigned long)rate_rms_filt.n, // sample count
@@ -766,6 +841,21 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     pitch_rate_rms.reset();
     rate_rms_raw.reset();
     rate_rms_filt.reset();
+  }
+
+  // Optional timed run stop. Dump is sent later from main() while idle.
+  if (sup->user_total_us > 0 && elapsed_us > sup->user_total_us) {
+    Serial.printf("balance exit: timed stop -> idle (elapsed=%lu us, limit=%lu us)\r\n",
+                  (unsigned long)elapsed_us,
+                  (unsigned long)sup->user_total_us);
+    sup->mode = SUP_MODE_IDLE;
+    if (telemetry_start_unwrap_dump()) {
+      Serial.println("unwrap dump: queued");
+    } else {
+      Serial.println("unwrap dump: not started (busy or SEND_LOG disabled)");
+    }
+    first_entry = true;
+    unwrap_init = false;
   }
 
 }
