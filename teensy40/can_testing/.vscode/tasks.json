@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlatformIO Build (teensy40)",
+      "type": "shell",
+      "command": "/Users/owhite/.platformio/penv/bin/platformio",
+      "args": ["run", "-e", "teensy40"],
+      "isBackground": false,
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "showReuseMessage": false,
+        "close": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PlatformIO Upload (No Button)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "TEENSY_REBOOT=/Users/owhite/.platformio/packages/tool-teensy/teensy_reboot; if [ -x \"$TEENSY_REBOOT\" ]; then \"$TEENSY_REBOOT\" || true; fi; /Users/owhite/.platformio/penv/bin/platformio run -e teensy40 -t upload"
+      ],
+      "isBackground": false,
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "showReuseMessage": false,
+        "close": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
