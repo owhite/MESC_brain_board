@@ -11,7 +11,7 @@ void loop() {
   // Serial.print("thing ");
   // Serial.println(count);
   digitalWrite(LED_PIN, HIGH);
-  delay(500);
+  delay(200);
   digitalWrite(LED_PIN, LOW);
-  delay(500);
+  delay(200);
 }

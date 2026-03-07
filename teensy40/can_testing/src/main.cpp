@@ -7,7 +7,7 @@
 #include "ESC.h"
 #include "CAN_helper.h"
 #include "supervisor.h"
-#include "balance_TWR_mode.h"
+#include "test_can_transmit_mode.h"
 
 // ---------------------- Setup / Loop -----------------------
 IntervalTimer g_ctrlTimer;
@@ -54,6 +54,9 @@ void setup() {
   Can1.begin();
   Can1.setBaudRate(500000);
   Can1.enableFIFO();
+
+  pinMode(CAN_STB, OUTPUT);
+  digitalWrite(CAN_STB, LOW);
 
   init_supervisor(&supervisor,
                   2,           // esc_count -- FIX: dont hard code this number
@@ -109,8 +112,7 @@ void loop() {
       tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
     }
     else if (pb_state == PB_RELEASED) {
-      // SupervisorMode test_mode = SUP_MODE_TEST_CAN;
-      SupervisorMode test_mode = SUP_MODE_BALANCE_TWR;
+      SupervisorMode test_mode = SUP_MODE_TEST_CAN;
       if (supervisor.mode == test_mode) {
         Serial.println("button: test_can mode already active; ignoring");
       } else {
@@ -133,7 +135,7 @@ void loop() {
 
     // Live CAN RX health for ESP32/python during balance.
     static uint32_t last_can_diag_us = 0;
-    if (supervisor.mode == SUP_MODE_BALANCE_TWR &&
+    if (supervisor.mode == SUP_MODE_TEST_CAN &&
         (uint32_t)(now_us - last_can_diag_us) >= 1000000u) {
       last_can_diag_us = now_us;
 
@@ -193,15 +195,15 @@ void loop() {
 	    while (Serial.available()) {
 	      char c = Serial.read();
         Serial.write((uint8_t)c);
-	      if (c == '\r') {
+	      if (c == '\r' || c == '\n') {
 		String line = input;
 		line.trim();
 
 		if (line == "run") {
-		  Serial.println("serial: received run command; starting balance_TWR mode");
+		  Serial.println("serial: received run command; starting test_can_transmit mode");
 		  tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
 		  supervisor.user_total_us = BALANCE_BUTTON_RUN_US;
-		  supervisor.mode = SUP_MODE_BALANCE_TWR;
+		  supervisor.mode = SUP_MODE_TEST_CAN;
 		} 
 		input = "";  // reset buffer
 	      } else {

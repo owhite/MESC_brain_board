@@ -6,6 +6,7 @@ FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> Can1;
 // --- Constants ---
 #define CAN_ID_POSVEL 0x2D0   // MESC POS/VEL ID
 #define LED_PIN 2
+#define CAN_STB 21
 
 // --- Ring buffer for safe message passing ---
 const int BUF_SIZE = 32;
@@ -99,6 +100,9 @@ void setup() {
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+
+  pinMode(CAN_STB, OUTPUT);
+  digitalWrite(CAN_STB, LOW); 
 
   // Fixed missing quote in your JSON string
   Serial.println("{\"status\":\"POSVEL reader started\"}\r\n");

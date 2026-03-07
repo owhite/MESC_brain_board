@@ -3,9 +3,6 @@
 #include "main.h"
 #include "test_can_transmit_mode.h"
 
-void balance_TWR_mode(Supervisor_typedef *sup,
-		      FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can);
-
 // ---------------- Global Flags ----------------
 // These are set by the control ISR to signal the main loop.
 volatile bool g_control_due = false;
@@ -238,7 +235,7 @@ void controlLoop(Supervisor_typedef *sup,
   }
  
   case SUP_MODE_BALANCE_TWR: {
-    balance_TWR_mode(sup, can);
+    test_can_transmit_mode(sup, can);
     break;
   }
 

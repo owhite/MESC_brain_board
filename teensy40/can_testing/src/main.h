@@ -16,6 +16,7 @@
 #define SPEAKER_PIN     14
 #define CS_PIN          10
 #define INT_PIN         20
+#define CAN_STB         21
 #define CAN_TX          24
 #define CAN_RX          25
 
