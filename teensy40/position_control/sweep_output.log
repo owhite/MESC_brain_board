@@ -1,0 +1,36 @@
+# started: 2026-03-18 16:21:53
+# port: /dev/cu.usbmodem138829401
+# baud: 115200
+# command: sweep -3600
+# line_ending_repr: \r
+# detected_ports:
+#    /dev/cu.BLTH  n/a  hwid=n/a
+#    /dev/cu.Bluetooth-Incoming-Port  n/a  hwid=n/a
+#    /dev/cu.usbmodem3381398832351  STM32 Virtual ComPort  hwid=USB VID:PID=0483:5740 SER=338139883235 LOCATION=20-4.4.1.2
+#  * /dev/cu.usbmodem138829401  USB Serial  hwid=USB VID:PID=16C0:0483 SER=13882940 LOCATION=20-4.4.1.1
+# opened: name=/dev/cu.usbmodem138829401 is_open=True timeout=0.2
+# line_status: dtr=True rts=True
+# settle_after_open_s: 1.0
+# pre_read_lines: 0
+# buffers: input/output reset
+# tx: wrote_bytes=12 expected_bytes=12
+# tx_hex: 7377656570202d333630300d
+# sent: sweep -3600 on /dev/cu.usbmodem138829401
+RX +00085ms sweep -3600serial: starting position mode with sweep -3600 deg
+RX +00086ms {"cmd":"POSITION_START","deg":-3600,"target_rad":-60.794727}
+RX +00186ms {"cmd":"POSITION_CTRL","t":357212040,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-5.480913,"pos_raw":0.802272,"vel_raw":-136.328751,"vel_ctrl":-155.966797,"err_rad":-55.313812,"tau_cmd":-0.9000,"tau_send":0.9000,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1951,"loop_dt_us":999,"loop_hz":1001.00,"ovr":0}
+RX +00286ms {"cmd":"POSITION_CTRL","t":357312042,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-29.093481,"pos_raw":2.322447,"vel_raw":-261.952057,"vel_ctrl":-279.343079,"err_rad":-31.701246,"tau_cmd":-0.9000,"tau_send":0.9000,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1960,"loop_dt_us":1001,"loop_hz":999.00,"ovr":0}
+RX +00387ms {"cmd":"POSITION_CTRL","t":357412037,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-56.918362,"pos_raw":5.913496,"vel_raw":-272.651917,"vel_ctrl":-263.784058,"err_rad":-3.876366,"tau_cmd":0.9000,"tau_send":-0.9000,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1966,"loop_dt_us":1002,"loop_hz":998.00,"ovr":0}
+RX +00486ms {"cmd":"POSITION_CTRL","t":357512038,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-64.523827,"pos_raw":4.591205,"vel_raw":20.115599,"vel_ctrl":59.195816,"err_rad":3.729099,"tau_cmd":0.6151,"tau_send":-0.6151,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1966,"loop_dt_us":1001,"loop_hz":999.00,"ovr":0}
+RX +00585ms {"cmd":"POSITION_CTRL","t":357612037,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.262432,"pos_raw":2.569418,"vel_raw":-3.940250,"vel_ctrl":-19.760752,"err_rad":-0.532295,"tau_cmd":-0.0332,"tau_send":0.0332,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1971,"loop_dt_us":999,"loop_hz":1001.00,"ovr":0}
+RX +00686ms {"cmd":"POSITION_CTRL","t":357712039,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.872963,"pos_raw":1.958894,"vel_raw":-0.288607,"vel_ctrl":1.194846,"err_rad":0.078236,"tau_cmd":0.1685,"tau_send":-0.1685,"jump_consec":0,"jump_total":0,"in_band":0,"new_pos":0,"pos_age_us":1977,"loop_dt_us":997,"loop_hz":1003.01,"ovr":0}
+RX +00786ms {"cmd":"POSITION_CTRL","t":357812037,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.762520,"pos_raw":2.069340,"vel_raw":0.511380,"vel_ctrl":1.850747,"err_rad":-0.032207,"tau_cmd":0.0675,"tau_send":-0.0675,"jump_consec":0,"jump_total":0,"in_band":1,"new_pos":0,"pos_age_us":1978,"loop_dt_us":998,"loop_hz":1002.00,"ovr":0}
+RX +00886ms {"cmd":"POSITION_CTRL","t":357912041,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.751785,"pos_raw":2.080078,"vel_raw":0.282629,"vel_ctrl":0.076710,"err_rad":-0.042942,"tau_cmd":-0.3347,"tau_send":0.3347,"jump_consec":0,"jump_total":0,"in_band":1,"new_pos":0,"pos_age_us":1984,"loop_dt_us":1006,"loop_hz":994.04,"ovr":0}
+RX +00986ms {"cmd":"POSITION_CTRL","t":358012040,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.808544,"pos_raw":2.023321,"vel_raw":-0.032948,"vel_ctrl":-0.000494,"err_rad":0.013817,"tau_cmd":0.0044,"tau_send":-0.0044,"jump_consec":0,"jump_total":0,"in_band":1,"new_pos":0,"pos_age_us":5992,"loop_dt_us":1003,"loop_hz":997.01,"ovr":0}
+RX +01086ms {"cmd":"POSITION_CTRL","t":358112038,"deg_cmd":-3600,"target_rad":-60.794727,"pos_unwrap_rad":-60.808544,"pos_raw":2.023321,"vel_raw":0.000000,"vel_ctrl":-0.000000,"err_rad":0.013817,"tau_cmd":0.0044,"tau_send":-0.0044,"jump_consec":0,"jump_total":0,"in_band":1,"new_pos":0,"pos_age_us":1986,"loop_dt_us":997,"loop_hz":1003.01,"ovr":0}
+RX +01086ms {"cmd":"CAN_TXQ_SUM","attempts":391,"ok":391,"fail":0,"fail_pct":0.000,"mode":6,"posvel_age_us":1947}
+RX +01104ms {"cmd":"POSITION_FAULT","reason":"stale_posvel","age_us":10991}
+# rx_lines: 14
+# saw_start_banner: 1
+# saw_position_start: 1
+# saw_terminal: 1

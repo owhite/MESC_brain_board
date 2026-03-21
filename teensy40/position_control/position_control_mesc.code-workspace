@@ -1,0 +1,17 @@
+{
+  "folders": [
+    {
+      "name": "position_control",
+      "path": "."
+    },
+    {
+      "name": "MESC_Firmware",
+      "path": "/Users/owhite/MESC_Firmware"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.pio": true
+    }
+  }
+}

@@ -26,7 +26,7 @@ CANBuffer canRxBuf;  // ✅ holds buffer + link_ok
 static TonePlayer g_tone;
 PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
 static constexpr uint32_t CAN_POSVEL_RX_TIMEOUT_US = 400000u;
-static constexpr uint32_t BALANCE_BUTTON_RUN_US = 1000000u;  // 5 seconds
+static constexpr uint32_t BALANCE_BUTTON_RUN_US = 5000000u;  // 5 seconds
 
 // Uncomment to ignore pushbutton state transitions.
 #define PB_OVERRIDE
@@ -54,7 +54,6 @@ void setup() {
   Can1.begin();
   Can1.setBaudRate(500000);
   Can1.enableFIFO();
-
   pinMode(CAN_STB, OUTPUT);
   digitalWrite(CAN_STB, LOW);
 
