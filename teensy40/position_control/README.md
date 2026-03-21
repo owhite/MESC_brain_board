@@ -195,7 +195,7 @@ This was set up for a gearbox. These are parameters to tweak for other setups:
 - try: `timed_sweep 3600` to turn the motor
 - try: `pwm_control` to use an RC transmitter for input
 -------------------------
-[Watch the demo video on YouTube](https://www.youtube.com/shorts/7sQ_XWcPYlw)
 
-[![Demo video thumbnail](https://img.youtube.com/vi/7sQ_XWcPYlw/hqdefault.jpg)](https://www.youtube.com/shorts/7sQ_XWcPYlw)
+
+[![Demo video](https://img.youtube.com/vi/7sQ_XWcPYlw/hqdefault.jpg)](https://www.youtube.com/shorts/7sQ_XWcPYlw)
 
