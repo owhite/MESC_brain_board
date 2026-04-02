@@ -142,8 +142,10 @@ void updateRC(Supervisor_typedef *sup) {
     if (pw < RC_INPUT_MIN_US) pw = RC_INPUT_MIN_US;
     if (pw > RC_INPUT_MAX_US) pw = RC_INPUT_MAX_US;
 
-    float norm = (float)(pw - RC_INPUT_MIN_US) /
-      (float)(RC_INPUT_MAX_US - RC_INPUT_MIN_US);
+    float norm = 2.0f * ((float)(pw - RC_INPUT_MIN_US) /
+      (float)(RC_INPUT_MAX_US - RC_INPUT_MIN_US)) - 1.0f;
+    if (norm < -1.0f) norm = -1.0f;
+    if (norm > 1.0f) norm = 1.0f;
 
     sup->rc[i].raw_us = pw;
     sup->rc[i].norm   = norm;

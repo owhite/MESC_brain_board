@@ -20,7 +20,8 @@ Supervisor_typedef supervisor;
 
 const char* esc_names[]   = {"left", "right"};
 const uint16_t esc_ids[]  = {11, 12}; // node_ids of the ESCs
-const uint8_t rc_pins[]   = {RC_INPUT1, RC_INPUT2, RC_INPUT3, RC_INPUT4};
+const uint8_t rc_pins[]   = {RC_INPUT1, RC_INPUT2, RC_INPUT3};
+static constexpr uint8_t RC_PIN_COUNT = sizeof(rc_pins) / sizeof(rc_pins[0]);
 
 
 // -------------------- CAN Communication --------------------
@@ -37,7 +38,7 @@ PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
 ICM42688 imu(SPI, CS_PIN);
 static volatile bool g_imu_data_ready = false;
 static constexpr uint32_t CAN_POSVEL_RX_TIMEOUT_US = 400000u;
-static constexpr uint32_t BALANCE_BUTTON_RUN_US = 30000000u;  // 30 seconds
+static constexpr uint32_t BALANCE_BUTTON_RUN_US = 0u;  // 0 = no auto-timeout
 // Runtime decimated printing can perturb timing; keep off for measurement runs.
 // Uncomment to ignore pushbutton state transitions.
 // #define PB_OVERRIDE
@@ -166,6 +167,17 @@ static void trim_ascii(char *s) {
   s[end - start] = '\0';
 }
 
+static void print_rc_channels_snapshot(const Supervisor_typedef &sup) {
+  Serial.printf("{\"cmd\":\"RC_CH\",\"count\":%u", (unsigned int)sup.rc_count);
+  for (uint8_t i = 0u; i < sup.rc_count; ++i) {
+    Serial.printf(",\"ch%u_valid\":%d,\"ch%u_raw_us\":%u,\"ch%u_norm\":%.3f",
+                  (unsigned int)(i + 1u), sup.rc[i].valid ? 1 : 0,
+                  (unsigned int)(i + 1u), (unsigned int)sup.rc[i].raw_us,
+                  (unsigned int)(i + 1u), sup.rc[i].norm);
+  }
+  Serial.printf("}\r\n");
+}
+
 void balance_zero_cross_tweet(void) {
   tone_start(&g_tone, ZERO_CROSS_BEEP_HZ, ZERO_CROSS_BEEP_MS, ZERO_CROSS_BEEP_GAP_MS);
 }
@@ -184,6 +196,83 @@ static void process_serial_line(const char *line) {
     supervisor.mode = SUP_MODE_BALANCE_TWR;
     Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_BALANCE_TWR\",\"run_us\":%lu}\r\n",
                   (unsigned long)supervisor.user_total_us);
+    return;
+  }
+
+  if (strcmp(line, "rc show") == 0) {
+    print_rc_channels_snapshot(supervisor);
+    return;
+  }
+
+  if (strcmp(line, "rc run") == 0) {
+    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+    canRxBuf.overflow_count = 0;
+    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
+      supervisor.esc_alive_false_count[i] = 0u;
+    }
+    supervisor.user_tx_enable = true;
+    supervisor.user_total_us = 0u;
+    supervisor.user_rc_drive_enable = true;
+    supervisor.mode = SUP_MODE_TEST_CAN;
+    Serial.printf(
+        "{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_TEST_CAN\",\"rc_drive\":1,"
+        "\"throttle_ch\":%u,\"steer_ch\":%u,\"deadband\":%.3f,\"max_torque_nm\":%.3f,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
+        (unsigned int)(supervisor.user_rc_throttle_ch + 1u),
+        (unsigned int)(supervisor.user_rc_steer_ch + 1u),
+        supervisor.user_rc_deadband,
+        supervisor.user_rc_max_torque_nm,
+        (unsigned long)supervisor.user_tx_period_us,
+        (supervisor.user_tx_period_us > 0u)
+            ? (1000000.0f / (float)supervisor.user_tx_period_us)
+            : 0.0f);
+    return;
+  }
+
+  if (strcmp(line, "rc stop") == 0) {
+    supervisor.user_rc_drive_enable = false;
+    supervisor.mode = SUP_MODE_IDLE;
+    supervisor.user_total_us = 0u;
+    Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"rc_stop\"}\r\n");
+    return;
+  }
+
+  float rc_max_nm = 0.0f;
+  if (sscanf(line, "rc max %f", &rc_max_nm) == 1) {
+    if (!(rc_max_nm >= 0.0f && rc_max_nm <= 2.0f)) {
+      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"max_torque_out_of_range\",\"value\":%.3f,\"min\":0.0,\"max\":2.0}\r\n",
+                    rc_max_nm);
+    } else {
+      supervisor.user_rc_max_torque_nm = rc_max_nm;
+      Serial.printf("{\"cmd\":\"RC_CFG\",\"max_torque_nm\":%.3f}\r\n", supervisor.user_rc_max_torque_nm);
+    }
+    return;
+  }
+
+  uint32_t rc_ch_t = 0u;
+  uint32_t rc_ch_s = 0u;
+  if (sscanf(line, "rc ch %lu %lu", &rc_ch_t, &rc_ch_s) == 2) {
+    if (rc_ch_t < 1u || rc_ch_s < 1u ||
+        rc_ch_t > supervisor.rc_count || rc_ch_s > supervisor.rc_count) {
+      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"channel_out_of_range\",\"count\":%u}\r\n",
+                    (unsigned int)supervisor.rc_count);
+    } else {
+      supervisor.user_rc_throttle_ch = (uint8_t)(rc_ch_t - 1u);
+      supervisor.user_rc_steer_ch = (uint8_t)(rc_ch_s - 1u);
+      Serial.printf("{\"cmd\":\"RC_CFG\",\"throttle_ch\":%u,\"steer_ch\":%u}\r\n",
+                    (unsigned int)rc_ch_t, (unsigned int)rc_ch_s);
+    }
+    return;
+  }
+
+  float rc_deadband = 0.0f;
+  if (sscanf(line, "rc deadband %f", &rc_deadband) == 1) {
+    if (!(rc_deadband >= 0.0f && rc_deadband < 0.5f)) {
+      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"deadband_out_of_range\",\"value\":%.3f,\"min\":0.0,\"max\":0.49}\r\n",
+                    rc_deadband);
+    } else {
+      supervisor.user_rc_deadband = rc_deadband;
+      Serial.printf("{\"cmd\":\"RC_CFG\",\"deadband\":%.3f}\r\n", supervisor.user_rc_deadband);
+    }
     return;
   }
 
@@ -339,7 +428,7 @@ void setup() {
                   esc_names,   // ESC names
                   esc_ids,     // ESC node IDs
                   rc_pins,     // RC pins
-                  4);          // RC count -- FIX: dont hard code this number
+                  RC_PIN_COUNT); // RC count
 
   // Start in idle; require explicit serial command "run" or pushbutton release to begin balance mode.
   supervisor.mode = SUP_MODE_IDLE;

@@ -58,7 +58,7 @@ struct RCInputRaw {
 
 // Normalized RC channel data after processing.
 struct RCChannel {
-  float norm;       // Normalized value [-1.0, 1.0] or [0, 1] depending on mapping
+  float norm;       // Normalized value in [-1.0, 1.0], centered at stick midpoint
   uint16_t raw_us;  // Raw pulse width in µs
   bool valid;       // True if the channel is valid and updated recently
 };
@@ -105,6 +105,11 @@ struct Supervisor_typedef {
   bool user_verify_motor_enable = false; // if true, VERIFY_ANGLE sends non-zero torque
   float user_verify_tau_left = 2.0f;     // left torque during verify+motor mode
   float user_verify_tau_right = -2.0f;   // right torque during verify+motor mode
+  bool user_rc_drive_enable = false;     // if true, TEST_CAN uses RC throttle/steering torque mixing
+  uint8_t user_rc_throttle_ch = 0u;      // 0-based index into rc[] array
+  uint8_t user_rc_steer_ch = 1u;         // 0-based index into rc[] array
+  float user_rc_deadband = 0.05f;        // deadband in normalized stick units
+  float user_rc_max_torque_nm = 1.0f;    // max absolute torque requested by RC mixer
   uint32_t user_pulse_us    = 1000;   // duration of pulse (µs)
   uint32_t user_total_us    = 1000;
   bool user_tx_enable       = true;   // Enables/disables torque command TX during test mode.

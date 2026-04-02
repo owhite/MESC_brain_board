@@ -57,11 +57,11 @@ void balance_zero_cross_tweet(void);
 
 
 // ================= RC PWM channels =================
-#define RC_INPUT1       9
-#define RC_INPUT2       8
-#define RC_INPUT3       7
-#define RC_INPUT4       6
-#define RC_INPUT5       5
-#define RC_INPUT6       4
+#define RC_INPUT1       4
+#define RC_INPUT2       5
+#define RC_INPUT3       6
+#define RC_INPUT4       7
+#define RC_INPUT5       8
+#define RC_INPUT6       9
 
 #endif // MAIN_H
