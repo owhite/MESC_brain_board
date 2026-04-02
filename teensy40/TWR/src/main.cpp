@@ -52,24 +52,35 @@ static float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;
 static float integralFBx = 0.0f, integralFBy = 0.0f, integralFBz = 0.0f;
 static const float twoKp = 2.0f * 0.5f;  // Kp = 0.5
 static const float twoKi = 2.0f * 0.1f;  // Ki = 0.1
+// Accelerometer trust window for Mahony correction. Narrower gating reduces
+// estimator kicks during brief dynamic acceleration.
+static constexpr float ACCEL_CORR_FULL_ERR_G = 0.02f;
+static constexpr float ACCEL_CORR_MAX_ERR_G = 0.06f;
 
 static void mahony_update_imu(float gx, float gy, float gz,
                               float ax, float ay, float az,
                               float dt_s) {
   float acc_mag = sqrtf(ax * ax + ay * ay + az * az);
-  bool accel_valid = false;
+  float accel_corr_gain = 0.0f;
 
   if (acc_mag > 1e-6f) {
     float recip = 1.0f / acc_mag;
     ax *= recip;
     ay *= recip;
     az *= recip;
-    accel_valid = (acc_mag > 0.85f && acc_mag < 1.15f);
+
+    const float acc_err_g = fabsf(acc_mag - 1.0f);
+    if (acc_err_g <= ACCEL_CORR_FULL_ERR_G) {
+      accel_corr_gain = 1.0f;
+    } else if (acc_err_g < ACCEL_CORR_MAX_ERR_G) {
+      accel_corr_gain = (ACCEL_CORR_MAX_ERR_G - acc_err_g) /
+                        (ACCEL_CORR_MAX_ERR_G - ACCEL_CORR_FULL_ERR_G);
+    }
   }
 
   float ex = 0.0f, ey = 0.0f, ez = 0.0f;
 
-  if (accel_valid) {
+  if (accel_corr_gain > 0.0f) {
     float vx = 2.0f * (q1 * q3 - q0 * q2);
     float vy = 2.0f * (q0 * q1 + q2 * q3);
     float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
@@ -77,6 +88,9 @@ static void mahony_update_imu(float gx, float gy, float gz,
     ex = (ay * vz - az * vy);
     ey = (az * vx - ax * vz);
     ez = (ax * vy - ay * vx);
+    ex *= accel_corr_gain;
+    ey *= accel_corr_gain;
+    ez *= accel_corr_gain;
 
     if (twoKi > 0.0f) {
       integralFBx += twoKi * ex * dt_s;
@@ -129,7 +143,8 @@ static void update_supervisor_imu(ICM42688 &imu_dev,
   float ay = imu_dev.accY();
   float az = imu_dev.accZ();
   float acc_mag = sqrtf(ax * ax + ay * ay + az * az);
-  uint8_t accel_valid = (acc_mag > 0.85f && acc_mag < 1.15f) ? 1u : 0u;
+  const float acc_err_g = fabsf(acc_mag - 1.0f);
+  uint8_t accel_valid = (acc_err_g <= ACCEL_CORR_MAX_ERR_G) ? 1u : 0u;
 
   float gx = imu_dev.gyrX() * DEG_TO_RAD;
   float gy = imu_dev.gyrY() * DEG_TO_RAD;

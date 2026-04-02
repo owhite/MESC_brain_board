@@ -31,6 +31,12 @@ static constexpr float TORQUE_CLAMP_NM = 2.0f;
 static constexpr float SAFETY_SCALE = 1.0f;
 static constexpr float THETA_FAIL_RAD = 0.6f;
 static constexpr float VEL_FAIL_RAD_S = 30.0f;
+// Temporary drift/vibration test mode:
+// - true: send constant torque after tare (no LQR command)
+// - false: normal balance control law
+static constexpr bool BALANCE_FIXED_TORQUE_TEST = false;
+// Set to +1.0f or -1.0f to choose spin direction for the vibration test.
+static constexpr float BALANCE_FIXED_TORQUE_NM = 1.0f;
 static constexpr uint32_t IMU_TIMEOUT_US = 20000u;
 static constexpr uint32_t ESC_TIMEOUT_US = 20000u;
 static constexpr uint16_t THETA_EQ_SAMPLES = 200u;
@@ -38,14 +44,17 @@ static constexpr uint32_t BALANCE_TX_PERIOD_US = 4000u; // 250 Hz
 static constexpr uint32_t BALANCE_LOG_SECONDS = 10u;
 static constexpr uint32_t BALANCE_LOG_HZ = 250u;
 static constexpr uint32_t BALANCE_LOG_CAPACITY = BALANCE_LOG_SECONDS * BALANCE_LOG_HZ;
-static constexpr float TARE_IMU_RATE_MAX_RAD_S = 0.25f;
-static constexpr float TARE_ESC_VEL_MAX_RAD_S = 1.0f;
-static constexpr uint16_t TARE_SETTLE_SAMPLES = 250u; // 250 ms at 1 kHz
+static constexpr float TARE_IMU_RATE_MAX_RAD_S = 0.12f;
+static constexpr float TARE_IMU_RAW_RATE_MAX_RAD_S = 0.20f;
+static constexpr float TARE_ACCEL_ERR_MAX_G = 0.03f;
+static constexpr float TARE_ESC_VEL_MAX_RAD_S = 0.6f;
+static constexpr uint16_t TARE_SETTLE_SAMPLES = 400u; // 400 ms at 1 kHz
 static constexpr float TARE_RATE_BIAS_MAX_RAD_S = 0.35f;
 static constexpr uint32_t TARE_WAIT_PRINT_US = 500000u;
 
 static constexpr float ZERO_CROSS_HYST_RAD = 0.01f;
 static constexpr uint32_t ZERO_CROSS_MIN_INTERVAL_US = 120000u;
+static constexpr uint32_t ZERO_CROSS_ARM_DELAY_US = 2000000u;
 
 // ESC POS telemetry plausibility guard (expects wrapped radians in [0, 2*pi)).
 static constexpr float POS_RAW_MIN_RAD = -0.5f;
@@ -58,6 +67,7 @@ static uint32_t g_last_tx_us = 0u;
 static uint32_t g_last_tare_wait_print_us = 0u;
 static int8_t g_theta_sign_state = 0;
 static uint32_t g_last_zero_cross_us = 0u;
+static uint32_t g_zero_cross_arm_us = 0u;
 
 static float g_theta_eq = 0.0f;
 static float g_theta_eq_accum = 0.0f;
@@ -222,6 +232,7 @@ static inline void reset_balance_state() {
   g_theta_eq = 0.0f;
   g_theta_sign_state = 0;
   g_last_zero_cross_us = 0u;
+  g_zero_cross_arm_us = 0u;
   g_theta_eq_accum = 0.0f;
   g_theta_dot_bias = 0.0f;
   g_theta_dot_bias_accum = 0.0f;
@@ -325,10 +336,11 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   g_start_us = now_us;
   g_last_tx_us = 0u;
     g_last_tare_wait_print_us = 0u;
-    g_theta_eq = 0.0f;
-    g_theta_sign_state = 0;
-    g_last_zero_cross_us = 0u;
-    g_theta_eq_accum = 0.0f;
+  g_theta_eq = 0.0f;
+  g_theta_sign_state = 0;
+  g_last_zero_cross_us = 0u;
+  g_zero_cross_arm_us = 0u;
+  g_theta_eq_accum = 0.0f;
     g_theta_dot_bias = 0.0f;
     g_theta_dot_bias_accum = 0.0f;
     g_theta_eq_count = 0u;
@@ -336,7 +348,10 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   g_unwrap_init = false;
   g_u_cmd_hold = 0.0f;
   diag_reset();
-  Serial.printf("{\"cmd\":\"BALANCE_START\",\"send_torque\":%d}\r\n", (int)SEND_TORQUE);
+  Serial.printf("{\"cmd\":\"BALANCE_START\",\"send_torque\":%d,\"fixed_torque_test\":%d,\"fixed_torque_nm\":%.3f}\r\n",
+                (int)SEND_TORQUE,
+                BALANCE_FIXED_TORQUE_TEST ? 1 : 0,
+                BALANCE_FIXED_TORQUE_NM);
 }
 
   const bool imu_fresh = sup->imu.valid &&
@@ -358,7 +373,11 @@ void balance_TWR_mode(Supervisor_typedef *sup,
                       ((uint32_t)(now_us - g_last_tx_us) >= tx_period_us);
 
   if (g_theta_eq_count < THETA_EQ_SAMPLES) {
-    const bool tare_stable = (fabsf(sup->imu.pitch_rate) <= TARE_IMU_RATE_MAX_RAD_S) &&
+    const float acc_err_g = fabsf(sup->imu.accel_mag_g - 1.0f);
+    const bool tare_stable = (sup->imu.accel_valid == 1u) &&
+                             (acc_err_g <= TARE_ACCEL_ERR_MAX_G) &&
+                             (fabsf(sup->imu.pitch_rate_raw) <= TARE_IMU_RAW_RATE_MAX_RAD_S) &&
+                             (fabsf(sup->imu.pitch_rate) <= TARE_IMU_RATE_MAX_RAD_S) &&
                              (fabsf(sup->esc[0].state.vel_rad_s) <= TARE_ESC_VEL_MAX_RAD_S) &&
                              (fabsf(sup->esc[1].state.vel_rad_s) <= TARE_ESC_VEL_MAX_RAD_S);
     const bool settle_done = (g_tare_stable_count >= TARE_SETTLE_SAMPLES);
@@ -391,7 +410,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
           g_unwrap_init = false;
           g_last_tx_us = 0u;
           g_theta_sign_state = 0;
-          g_last_zero_cross_us = 0u;
+          g_last_zero_cross_us = now_us;
+          g_zero_cross_arm_us = now_us + ZERO_CROSS_ARM_DELAY_US;
           Serial.printf("{\"cmd\":\"BALANCE_TARE_DONE\",\"theta_eq_rad\":%.6f,\"theta_dot_bias_rad_s\":%.6f}\r\n",
                         g_theta_eq, g_theta_dot_bias);
         }
@@ -402,13 +422,16 @@ void balance_TWR_mode(Supervisor_typedef *sup,
         ((uint32_t)(now_us - g_last_tare_wait_print_us) >= TARE_WAIT_PRINT_US)) {
       g_last_tare_wait_print_us = now_us;
       Serial.printf(
-          "{\"cmd\":\"BALANCE_TARE_WAIT\",\"tare_stable\":%d,\"settle_count\":%u,\"settle_target\":%u,\"eq_count\":%u,\"eq_target\":%u,\"imu_pitch_rate\":%.6f,\"vel_l\":%.6f,\"vel_r\":%.6f}\r\n",
+          "{\"cmd\":\"BALANCE_TARE_WAIT\",\"tare_stable\":%d,\"settle_count\":%u,\"settle_target\":%u,\"eq_count\":%u,\"eq_target\":%u,\"imu_pitch_rate\":%.6f,\"imu_pitch_rate_raw\":%.6f,\"imu_acc_mag_g\":%.6f,\"imu_acc_err_g\":%.6f,\"vel_l\":%.6f,\"vel_r\":%.6f}\r\n",
           tare_stable ? 1 : 0,
           (unsigned int)g_tare_stable_count,
           (unsigned int)TARE_SETTLE_SAMPLES,
           (unsigned int)g_theta_eq_count,
           (unsigned int)THETA_EQ_SAMPLES,
           sup->imu.pitch_rate,
+          sup->imu.pitch_rate_raw,
+          sup->imu.accel_mag_g,
+          acc_err_g,
           sup->esc[0].state.vel_rad_s,
           sup->esc[1].state.vel_rad_s);
     }
@@ -431,7 +454,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   if (theta_sign != 0) {
     if (g_theta_sign_state != 0 && theta_sign != g_theta_sign_state) {
-      if ((uint32_t)(now_us - g_last_zero_cross_us) >= ZERO_CROSS_MIN_INTERVAL_US) {
+      if (now_us >= g_zero_cross_arm_us &&
+          (uint32_t)(now_us - g_last_zero_cross_us) >= ZERO_CROSS_MIN_INTERVAL_US) {
         balance_zero_cross_tweet();
         g_last_zero_cross_us = now_us;
       }
@@ -447,7 +471,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   float x_dot_m_s = 0.0f;
   update_wheel_unwrap(pos_l, pos_r, vel_l, vel_r, dt_s, &x_wheel_m, &x_dot_m_s);
 
-  if (!g_pos_range_ok || !g_pos_step_ok) {
+  if (!BALANCE_FIXED_TORQUE_TEST && (!g_pos_range_ok || !g_pos_step_ok)) {
     Serial.printf(
         "{\"cmd\":\"BALANCE_ABORT\",\"reason\":\"pos_units\",\"pos_l_raw\":%.6f,\"pos_r_raw\":%.6f,\"d_l_rad\":%.6f,\"d_r_rad\":%.6f,\"range_ok\":%d,\"step_ok\":%d}\r\n",
         pos_l, pos_r, g_last_d_l_rad, g_last_d_r_rad, g_pos_range_ok ? 1 : 0, g_pos_step_ok ? 1 : 0);
@@ -456,7 +480,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     return;
   }
 
-  if (fabsf(theta) > THETA_FAIL_RAD || fabsf(vel_l) > VEL_FAIL_RAD_S || fabsf(vel_r) > VEL_FAIL_RAD_S) {
+  if (!BALANCE_FIXED_TORQUE_TEST &&
+      (fabsf(theta) > THETA_FAIL_RAD || fabsf(vel_l) > VEL_FAIL_RAD_S || fabsf(vel_r) > VEL_FAIL_RAD_S)) {
     Serial.printf("{\"cmd\":\"BALANCE_ABORT\",\"reason\":\"limits\",\"theta\":%.4f,\"vel_l\":%.3f,\"vel_r\":%.3f}\r\n",
                   theta, vel_l, vel_r);
     diag_dump("limits");
@@ -464,10 +489,12 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     return;
   }
 
-  const float u_model = -(K_DISC[0] * theta +
-                          K_DISC[1] * theta_dot +
-                          K_DISC[2] * x_wheel_m +
-                          K_DISC[3] * x_dot_m_s) * SAFETY_SCALE;
+  const float u_model = BALANCE_FIXED_TORQUE_TEST
+                            ? BALANCE_FIXED_TORQUE_NM
+                            : (-(K_DISC[0] * theta +
+                                 K_DISC[1] * theta_dot +
+                                 K_DISC[2] * x_wheel_m +
+                                 K_DISC[3] * x_dot_m_s) * SAFETY_SCALE);
 
   if (tx_due) {
     float u_cmd = clampf(u_model, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
