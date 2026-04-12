@@ -11,6 +11,10 @@ volatile uint32_t g_control_pending_ticks = 0;
 volatile uint32_t g_control_now_us = 0;
 static constexpr uint32_t ESC_ALIVE_TIMEOUT_US = 200000u;
 
+static inline bool is_balance_mode(SupervisorMode m) {
+  return (m == SUP_MODE_BALANCE_HOLD) || (m == SUP_MODE_BALANCE_TWR);
+}
+
 // Note there are multiple ISRs, some for the controlLoop(),
 // and some for RC transmitter input capture.
 
@@ -327,7 +331,7 @@ void controlLoop(Supervisor_typedef *sup,
   // ---- Core control loop body ----
   static SupervisorMode s_prev_mode = SUP_MODE_IDLE;
   if (sup->mode != s_prev_mode) {
-    if (s_prev_mode == SUP_MODE_BALANCE_TWR && sup->mode != SUP_MODE_BALANCE_TWR) {
+    if (is_balance_mode(s_prev_mode) && !is_balance_mode(sup->mode)) {
       balance_TWR_dump_on_mode_exit("mode_exit");
     }
     if (sup->mode == SUP_VERIFY_ANGLE) {
@@ -399,6 +403,11 @@ void controlLoop(Supervisor_typedef *sup,
     break;
   }
  
+  case SUP_MODE_BALANCE_HOLD: {
+    balance_TWR_mode(sup, can1, can2);
+    break;
+  }
+
   case SUP_MODE_BALANCE_TWR: {
     balance_TWR_mode(sup, can1, can2);
     break;

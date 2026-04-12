@@ -16,21 +16,59 @@
 #define SPEAKER_PIN     14
 #define CS_PIN          10
 #define INT_PIN         20
-#define CAN_STB         21
-#define CAN_TX          24
-#define CAN_RX          25
+#define CAN_STB         21   // Verify this pin drives the CAN2 transceiver standby on brain_board V1.6.
+// FlexCAN_T4 setRX()/setTX() takes FLEXCAN_PINS enum, not literal GPIO numbers.
+// For CAN1 on Teensy 4.0, DEF selects CAN1_RX=pin 23 and CAN1_TX=pin 22.
+#define CAN1_PINSEL     DEF
+// Set to 0 to fully disable CAN1 traffic during A/B tests (TX and RX on Teensy side).
+#define CAN1_ENABLE     1
+// For CAN2 on Teensy 4.0, DEF selects CAN2_RX=pin 0 and CAN2_TX=pin 1.
+#define CAN2_PINSEL     DEF
+
+// CAN RX strategy A/B switch:
+// 0 = polling in loop() (legacy behavior)
+// 1 = ISR callback + events() dispatch
+#ifndef CAN_RX_USE_ISR
+#define CAN_RX_USE_ISR 1
+#endif
+
+// Global compile-time safety gate for wheel command transmission.
+// 0 = never send IQREQ torque frames from Teensy
+// 1 = allow IQREQ torque TX (normal behavior)
+#ifndef SEND_TORQUE
+#define SEND_TORQUE 1
+#endif
+
+// ================= CAN TX routing =================
+// Route each ESC node to exactly one physical CAN controller.
+// This avoids writing every command on both buses.
+#define CAN_TX_BUS_CAN1 1
+#define CAN_TX_BUS_CAN2 2
+#define CAN_TX_BUS_BOTH 3
+
+// Current bench mapping:
+// - node 11 uses CAN2
+// - node 12 uses CAN1
+#define ESC_NODE11_TX_BUS CAN_TX_BUS_CAN2
+#define ESC_NODE12_TX_BUS CAN_TX_BUS_CAN1
+
+static inline uint8_t can_tx_bus_for_node(uint8_t node_id) {
+  if (node_id == 11u) return ESC_NODE11_TX_BUS;
+  if (node_id == 12u) return ESC_NODE12_TX_BUS;
+  return CAN_TX_BUS_BOTH;  // fallback for unknown nodes
+}
+
+// Short chirp used by balance mode when theta_tared crosses zero.
+void balance_zero_cross_tweet(void);
 
 
 
 // ================= RC PWM channels =================
-#define RC_INPUT1       9
-#define RC_INPUT2       8
-#define RC_INPUT3       7
-#define RC_INPUT4       6
-#define RC_INPUT5       5
-#define RC_INPUT6       4
-
-// Non-blocking short beeper chirp (uses TonePlayer state machine)
-void beeper_tweet();
+#define RC_INPUT1       4
+#define RC_INPUT2       5
+#define RC_INPUT3       6
+#define RC_INPUT4       7
+#define RC_INPUT5       8
+#define RC_INPUT6       9
 
 #endif // MAIN_H

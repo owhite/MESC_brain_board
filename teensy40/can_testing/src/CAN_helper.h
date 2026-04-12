@@ -5,12 +5,17 @@
 #include <FlexCAN_T4.h>
 #include "ESC.h"
 
-#define CAN_BUF_SIZE 32
+#define CAN_BUF_SIZE 256
 #define CAN_ID_POSVEL 0x2D0
 #define CAN_ID_TEMPS  0x2D1
+#define CAN_ID_STATUS 0x2C0
+#define CAN_ID_FOC_HYPER 0x2C1
+#define POSVEL_GAP_SPIKE_US 3000
+#define POSVEL_GAP_SPIKE_RING_SIZE 128
 
 struct CANBuffer {
     CAN_message_t buf[CAN_BUF_SIZE];
+    uint8_t bus[CAN_BUF_SIZE];
     volatile int head = 0;
     volatile int tail = 0;
     volatile int overflow_count = 0;
@@ -21,14 +26,55 @@ struct PosvelRxStats {
   uint32_t count = 0;
   uint32_t last_rx_us = 0;
   uint32_t min_gap_us = UINT32_MAX;
+  uint32_t p50_gap_us = 0;
+  uint32_t p95_gap_us = 0;
+  uint32_t p99_gap_us = 0;
   uint32_t max_gap_us = 0;
   uint64_t sum_gap_us = 0;
   uint32_t gap_count = 0;
   uint32_t est_missed = 0;
 };
 
-bool canBufferPush(CANBuffer &cb, const CAN_message_t &msg);
-bool canBufferPop(CANBuffer &cb, CAN_message_t &msg);
+struct PosvelSeqStats {
+  uint32_t valid_count = 0;
+  uint32_t last_seq = 0;
+  uint8_t has_last = 0;
+  uint32_t missed_total = 0;
+  uint32_t duplicate_total = 0;
+  uint32_t out_of_order_total = 0;
+  uint32_t burst_miss_max = 0;
+};
+
+struct CanRuntimeStats {
+  uint32_t can1_rx_reads = 0;
+  uint32_t can2_rx_reads = 0;
+  uint32_t rx_overflow = 0;
+};
+
+struct CanEventDispatchStats {
+  uint32_t call_count = 0;
+  uint32_t last_call_us = 0;
+  uint32_t min_dt_us = UINT32_MAX;
+  uint32_t avg_dt_us = 0;
+  uint32_t max_dt_us = 0;
+  uint32_t over_1000_us = 0;
+  uint32_t over_2000_us = 0;
+};
+
+struct F405OverrunStats {
+  uint32_t fifo0_overrun_count = 0;
+  uint32_t fifo1_overrun_count = 0;
+  uint32_t last_rx_us = 0;
+};
+
+struct F405IqreqStats {
+  uint32_t iqreq_seq_valid_count = 0;
+  uint32_t iqreq_seq_missed_total = 0;
+  uint32_t last_rx_us = 0;
+};
+
+bool canBufferPush(CANBuffer &cb, const CAN_message_t &msg, uint8_t rx_bus);
+bool canBufferPop(CANBuffer &cb, CAN_message_t &msg, uint8_t *rx_bus);
 
 uint8_t extractNodeID(uint32_t can_id);
 uint16_t extractMsgType(uint32_t can_id);
@@ -38,7 +84,27 @@ uint32_t canMakeExtId(uint16_t msg_id, uint8_t sender, uint8_t receiver);
 void canPackFloat(float val, uint8_t *buf);
 uint32_t canGetLastPosVelRxUs();
 bool canGetPosvelRxStats(uint8_t node_id, PosvelRxStats &out);
+bool canGetPosvelSeqStats(uint8_t node_id, PosvelSeqStats &out);
+bool canGetPosvelIngressSeqStats(uint8_t node_id, PosvelSeqStats &out);
+bool canGetBusPosvelRxStats(uint8_t bus, PosvelRxStats &out);
+bool canGetF405OverrunStats(uint8_t node_id, F405OverrunStats &out);
+bool canGetF405IqreqStats(uint8_t node_id, F405IqreqStats &out);
+void canResetPosvelStats();
+void canResetF405OverrunStats();
+void canResetF405IqreqStats();
+uint32_t canGetPosvelGapSpikeThresholdUs();
+uint32_t canGetPosvelGapSpikeCount(uint8_t node_id);
+uint16_t canCopyPosvelGapSpikeTimes(uint8_t node_id, uint32_t *out, uint16_t max_out);
+void canNoteBusRead(uint8_t bus);
+void canNoteRxOverflow();
+CanRuntimeStats canGetRuntimeStats();
+void canResetRuntimeStats();
+void canNoteEventsDispatch(uint8_t bus, uint32_t now_us);
+bool canGetEventsDispatchStats(uint8_t bus, CanEventDispatchStats &out);
+void canResetEventsDispatchStats();
+void canNotePosvelIngress(const CAN_message_t &msg);
 
-void handleCANMessage(const CAN_message_t &msg);
+extern CAN_message_t g_last_can_msg;
+void handleCANMessage(const CAN_message_t &msg, uint8_t rx_bus);
 
 #endif

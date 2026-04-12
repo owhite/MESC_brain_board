@@ -34,11 +34,19 @@ static TonePlayer g_tone;
 static constexpr uint32_t ZERO_CROSS_BEEP_HZ = 2800u;
 static constexpr uint32_t ZERO_CROSS_BEEP_MS = 10u;
 static constexpr uint32_t ZERO_CROSS_BEEP_GAP_MS = 0u;
+static constexpr uint32_t BALANCE_EXIT_BEEP_HZ = 2200u;
+static constexpr uint32_t BALANCE_EXIT_BEEP_MS = 30u;
+static constexpr uint32_t BALANCE_EXIT_BEEP_GAP_MS = 0u;
 PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
 ICM42688 imu(SPI, CS_PIN);
 static volatile bool g_imu_data_ready = false;
 static constexpr uint32_t CAN_POSVEL_RX_TIMEOUT_US = 400000u;
 static constexpr uint32_t BALANCE_BUTTON_RUN_US = 0u;  // 0 = no auto-timeout
+static constexpr uint32_t BALANCE_BUTTON_STOP_GUARD_US = 800000u; // Ignore stop press for first 0.8 s.
+static constexpr float BALANCE_ENTRY_TARGET_RAD = -0.020f;
+static constexpr float BALANCE_ENTRY_TOL_RAD = 0.008f;
+static uint32_t g_balance_mode_enter_us = 0u;
+static SupervisorMode g_prev_mode_for_exit_tweet = SUP_MODE_IDLE;
 // Runtime decimated printing can perturb timing; keep off for measurement runs.
 // Uncomment to ignore pushbutton state transitions.
 // #define PB_OVERRIDE
@@ -183,7 +191,15 @@ static void trim_ascii(char *s) {
 }
 
 static void print_rc_channels_snapshot(const Supervisor_typedef &sup) {
-  Serial.printf("{\"cmd\":\"RC_CH\",\"count\":%u", (unsigned int)sup.rc_count);
+  Serial.printf(
+      "{\"cmd\":\"RC_CH\",\"count\":%u,\"throttle_ch\":%u,\"steer_ch\":%u,\"throttle_invert\":%d,\"steer_invert\":%d,\"deadband\":%.3f,\"max_torque_nm\":%.3f",
+      (unsigned int)sup.rc_count,
+      (unsigned int)(sup.user_rc_throttle_ch + 1u),
+      (unsigned int)(sup.user_rc_steer_ch + 1u),
+      sup.user_rc_throttle_invert ? 1 : 0,
+      sup.user_rc_steer_invert ? 1 : 0,
+      sup.user_rc_deadband,
+      sup.user_rc_max_torque_nm);
   for (uint8_t i = 0u; i < sup.rc_count; ++i) {
     Serial.printf(",\"ch%u_valid\":%d,\"ch%u_raw_us\":%u,\"ch%u_norm\":%.3f",
                   (unsigned int)(i + 1u), sup.rc[i].valid ? 1 : 0,
@@ -191,6 +207,15 @@ static void print_rc_channels_snapshot(const Supervisor_typedef &sup) {
                   (unsigned int)(i + 1u), sup.rc[i].norm);
   }
   Serial.printf("}\r\n");
+}
+
+static inline bool balance_entry_angle_ready(const Supervisor_typedef &sup) {
+  if (!sup.imu.valid) return false;
+  return fabsf(sup.imu.pitch_rad - BALANCE_ENTRY_TARGET_RAD) <= BALANCE_ENTRY_TOL_RAD;
+}
+
+static inline bool is_balance_mode(SupervisorMode m) {
+  return (m == SUP_MODE_BALANCE_HOLD) || (m == SUP_MODE_BALANCE_TWR);
 }
 
 void balance_zero_cross_tweet(void) {
@@ -208,8 +233,9 @@ static void process_serial_line(const char *line) {
     }
     supervisor.user_tx_enable = true;
     supervisor.user_total_us = BALANCE_BUTTON_RUN_US;
-    supervisor.mode = SUP_MODE_BALANCE_TWR;
-    Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_BALANCE_TWR\",\"run_us\":%lu}\r\n",
+    supervisor.mode = SUP_MODE_BALANCE_HOLD;
+    g_balance_mode_enter_us = micros();
+    Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_BALANCE_HOLD\",\"run_us\":%lu}\r\n",
                   (unsigned long)supervisor.user_total_us);
     return;
   }
@@ -231,9 +257,11 @@ static void process_serial_line(const char *line) {
     supervisor.mode = SUP_MODE_TEST_CAN;
     Serial.printf(
         "{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_TEST_CAN\",\"rc_drive\":1,"
-        "\"throttle_ch\":%u,\"steer_ch\":%u,\"deadband\":%.3f,\"max_torque_nm\":%.3f,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
+        "\"throttle_ch\":%u,\"steer_ch\":%u,\"throttle_invert\":%d,\"steer_invert\":%d,\"deadband\":%.3f,\"max_torque_nm\":%.3f,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
         (unsigned int)(supervisor.user_rc_throttle_ch + 1u),
         (unsigned int)(supervisor.user_rc_steer_ch + 1u),
+        supervisor.user_rc_throttle_invert ? 1 : 0,
+        supervisor.user_rc_steer_invert ? 1 : 0,
         supervisor.user_rc_deadband,
         supervisor.user_rc_max_torque_nm,
         (unsigned long)supervisor.user_tx_period_us,
@@ -246,6 +274,7 @@ static void process_serial_line(const char *line) {
   if (strcmp(line, "rc stop") == 0) {
     supervisor.user_rc_drive_enable = false;
     supervisor.mode = SUP_MODE_IDLE;
+    g_balance_mode_enter_us = 0u;
     supervisor.user_total_us = 0u;
     Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"rc_stop\"}\r\n");
     return;
@@ -275,6 +304,21 @@ static void process_serial_line(const char *line) {
       supervisor.user_rc_steer_ch = (uint8_t)(rc_ch_s - 1u);
       Serial.printf("{\"cmd\":\"RC_CFG\",\"throttle_ch\":%u,\"steer_ch\":%u}\r\n",
                     (unsigned int)rc_ch_t, (unsigned int)rc_ch_s);
+    }
+    return;
+  }
+
+  uint32_t inv_t = 0u;
+  uint32_t inv_s = 0u;
+  if (sscanf(line, "rc invert %lu %lu", &inv_t, &inv_s) == 2) {
+    if ((inv_t > 1u) || (inv_s > 1u)) {
+      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"invert_out_of_range\",\"expected\":\"0_or_1\"}\r\n");
+    } else {
+      supervisor.user_rc_throttle_invert = (inv_t != 0u);
+      supervisor.user_rc_steer_invert = (inv_s != 0u);
+      Serial.printf("{\"cmd\":\"RC_CFG\",\"throttle_invert\":%d,\"steer_invert\":%d}\r\n",
+                    supervisor.user_rc_throttle_invert ? 1 : 0,
+                    supervisor.user_rc_steer_invert ? 1 : 0);
     }
     return;
   }
@@ -447,6 +491,7 @@ void setup() {
 
   // Start in idle; require explicit serial command "run" or pushbutton release to begin balance mode.
   supervisor.mode = SUP_MODE_IDLE;
+  g_prev_mode_for_exit_tweet = supervisor.mode;
   supervisor.user_total_us = 0;
   supervisor.user_tx_enable = true;
   supervisor.user_tx_period_us = 4000;  // default 250 Hz command TX
@@ -479,6 +524,16 @@ void loop() {
     interrupts();
     controlLoop(&supervisor, Can1, Can2);
   }
+
+  // Tweet exactly once whenever balance mode exits.
+  if (is_balance_mode(g_prev_mode_for_exit_tweet) &&
+      !is_balance_mode(supervisor.mode)) {
+    tone_start(&g_tone, BALANCE_EXIT_BEEP_HZ, BALANCE_EXIT_BEEP_MS, BALANCE_EXIT_BEEP_GAP_MS);
+    Serial.printf("{\"cmd\":\"BALANCE_EXIT_TWEET\",\"from\":%d,\"to\":%d}\r\n",
+                  (int)g_prev_mode_for_exit_tweet,
+                  (int)supervisor.mode);
+  }
+  g_prev_mode_for_exit_tweet = supervisor.mode;
 
   // -------- CAN POLLING --------
   // Non-blocking and not based on an ISR because FLEXCAN_T4 did seem to work. 
@@ -520,6 +575,22 @@ void loop() {
   led_set_state(&g_led_red, posvel_rx_fresh ? LED_PULSE : LED_OFF);
   led_update(&g_led_red, now_us);
 
+  // LED2 behavior:
+  // - Idle: OFF by default.
+  // - While button held in idle: ON only when pitch is near entry target.
+  // - Other modes: link-health indicator.
+  const bool entry_ready_now = balance_entry_angle_ready(supervisor);
+  if (supervisor.mode == SUP_MODE_IDLE) {
+    if (g_button.getState() == PB_PRESSED && entry_ready_now) {
+      led_set_state(&g_led_green, LED_ON_CONTINUOUS);
+    } else {
+      led_set_state(&g_led_green, LED_OFF);
+    }
+  } else {
+    led_set_state(&g_led_green, canRxBuf.link_ok ? LED_ON_CONTINUOUS : LED_BLINK_SLOW);
+  }
+  led_update(&g_led_green, now_us);
+
   // PUSHBUTTON (run every loop to avoid latency in target capture)
 #ifndef PB_OVERRIDE
   g_button.update(now_us);
@@ -527,28 +598,69 @@ void loop() {
     PBState pb_state = g_button.getState();
 
     if (pb_state == PB_PRESSED) {
-      tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+      Serial.printf(
+          "{\"cmd\":\"BUTTON_PRESS_ANGLE\",\"t\":%lu,\"imu_valid\":%d,\"pitch_raw_rad\":%.6f,\"pitch_raw_deg\":%.3f,\"pitch_rate_raw_rad_s\":%.6f,\"pitch_rate_raw_deg_s\":%.3f}\r\n",
+          (unsigned long)now_us,
+          supervisor.imu.valid ? 1 : 0,
+          supervisor.imu.pitch_rad,
+          supervisor.imu.pitch_rad * (180.0f / PI),
+          supervisor.imu.pitch_rate_raw,
+          supervisor.imu.pitch_rate_raw * (180.0f / PI));
     }
-	    else if (pb_state == PB_RELEASED) {
-	      SupervisorMode balance_mode = SUP_MODE_BALANCE_TWR;
+    else if (pb_state == PB_RELEASED) {
+      if (!g_button.isArmed()) {
+        g_button.clearChanged();
+        return;
+      }
+	      SupervisorMode balance_mode = SUP_MODE_BALANCE_HOLD;
 	      if (supervisor.mode == balance_mode) {
+          const uint32_t since_enter_us = now_us - g_balance_mode_enter_us;
+          if (since_enter_us < BALANCE_BUTTON_STOP_GUARD_US) {
+            Serial.printf("{\"cmd\":\"BUTTON_IGNORED\",\"reason\":\"start_guard\",\"since_enter_us\":%lu,\"guard_us\":%lu}\r\n",
+                          (unsigned long)since_enter_us,
+                          (unsigned long)BALANCE_BUTTON_STOP_GUARD_US);
+            g_button.clearArmed();
+            g_button.clearChanged();
+            return;
+          }
           // Button press while balancing: exit to idle.
           balance_TWR_dump_on_mode_exit("button_stop");
           supervisor.mode = SUP_MODE_IDLE;
+          g_balance_mode_enter_us = 0u;
           supervisor.user_total_us = 0u;
           Serial.printf("{\"cmd\":\"BUTTON_IDLE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\"}\r\n");
           Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"button_stop\"}\r\n");
-        } else {
-          canRxBuf.overflow_count = 0;
-          for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-            supervisor.esc_alive_false_count[i] = 0u;
-          }
-	          supervisor.user_tx_enable = true;
-	        supervisor.user_total_us = BALANCE_BUTTON_RUN_US;
-	        supervisor.mode = balance_mode;
-          Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_BALANCE_TWR\",\"run_us\":%lu}\r\n",
-                        (unsigned long)supervisor.user_total_us);
-	      }
+	        } else if (supervisor.mode == SUP_MODE_IDLE) {
+	          const bool ready_release = balance_entry_angle_ready(supervisor);
+          if (ready_release) {
+            canRxBuf.overflow_count = 0;
+            for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
+              supervisor.esc_alive_false_count[i] = 0u;
+            }
+            supervisor.user_tx_enable = true;
+            supervisor.user_total_us = BALANCE_BUTTON_RUN_US;
+            supervisor.mode = balance_mode;
+            g_balance_mode_enter_us = now_us;
+            balance_zero_cross_tweet();
+            Serial.printf(
+                "{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_BALANCE_HOLD\",\"run_us\":%lu,\"entry_pitch_rad\":%.6f,\"entry_target_rad\":%.6f,\"entry_tol_rad\":%.6f}\r\n",
+                (unsigned long)supervisor.user_total_us,
+                supervisor.imu.pitch_rad,
+                BALANCE_ENTRY_TARGET_RAD,
+                BALANCE_ENTRY_TOL_RAD);
+          } else {
+            Serial.printf(
+                "{\"cmd\":\"BUTTON_START_REJECT\",\"reason\":\"angle_not_ready\",\"imu_valid\":%d,\"pitch_raw_rad\":%.6f,\"target_rad\":%.6f,\"tol_rad\":%.6f}\r\n",
+                supervisor.imu.valid ? 1 : 0,
+                supervisor.imu.pitch_rad,
+                BALANCE_ENTRY_TARGET_RAD,
+                BALANCE_ENTRY_TOL_RAD);
+	          }
+          } else {
+            Serial.printf("{\"cmd\":\"BUTTON_IGNORED\",\"reason\":\"unsupported_mode\",\"mode\":%d}\r\n",
+                          (int)supervisor.mode);
+		      }
+        g_button.clearArmed();
 	    }
     g_button.clearChanged();
   }
@@ -591,14 +703,10 @@ void loop() {
         }
 	    }
 
-    // LED CONTROL
+    // LOW-RATE UPDATES
     tone_update(&g_tone, now_us);
-    led_update(&g_led_green, now_us);
-
-    // 1 Hz HEALTH CHECK
     if (millis() - supervisor.last_health_ms > 1000) {
       supervisor.last_health_ms = millis();
-      led_set_state(&g_led_green, canRxBuf.link_ok ? LED_ON_CONTINUOUS : LED_BLINK_SLOW);
     }
 
   } // end of low priority loop

@@ -18,9 +18,31 @@
 static constexpr float K_DISC[4] = {
     5.30f,   // K_theta
     0.42f,   // K_theta_dot
-    0.0f,    // K_x (isolation test)
-    0.0f     // K_x_dot (isolation test)
+    1.00f,   // K_x      -> position-hold (wheel center return)
+    0.35f    // K_x_dot  -> damping on platform translation
 };
+// Slow integral action on wheel-position error for bias rejection.
+// This helps hold a fixed wheel position in the presence of small constant
+// offsets (IMU bias, motor mismatch, asymmetrical friction).
+static constexpr float POS_HOLD_KI = 0.35f;         // Nm per (m*s)
+static constexpr float POS_HOLD_I_CLAMP_NM = 0.35f; // clamp integral contribution
+// Enable position-hold terms only when we're close enough to upright.
+// This prevents x-channel terms from fighting aggressive tilt recovery.
+static constexpr float X_HOLD_ENABLE_THETA_RAD = 0.05f;
+static constexpr float X_HOLD_ENABLE_THETA_DOT_RAD_S = 0.35f;
+static constexpr float X_HOLD_ENABLE_X_DOT_M_S = 0.03f;
+// When disabled, decay the x integrator to avoid persistent bias build-up.
+static constexpr float X_HOLD_INT_LEAK_PER_STEP = 0.995f;
+// Disable automatic x_ref chasing by default so hold mode keeps the wheels
+// parked near the original start location.
+static constexpr bool X_REF_RECENTER_ENABLE = false;
+// Slow re-center of x_ref when truly stable (hold mode only), to avoid
+// long-lived lean bias from tiny tare/model offsets.
+static constexpr float X_REF_RECENTER_THETA_RAD = 0.04f;
+static constexpr float X_REF_RECENTER_THETA_DOT_RAD_S = 0.30f;
+static constexpr float X_REF_RECENTER_XDOT_M_S = 0.05f;
+static constexpr uint32_t X_REF_RECENTER_STABLE_US = 700000u;
+static constexpr float X_REF_RECENTER_TAU_S = 2.0f;
 
 // Keep aligned with model assumptions.
 static constexpr float WHEEL_RADIUS_M = 0.05278f;
@@ -55,6 +77,9 @@ static constexpr uint32_t TARE_WAIT_PRINT_US = 500000u;
 static constexpr float ZERO_CROSS_HYST_RAD = 0.01f;
 static constexpr uint32_t ZERO_CROSS_MIN_INTERVAL_US = 120000u;
 static constexpr uint32_t ZERO_CROSS_ARM_DELAY_US = 2000000u;
+static constexpr float RC_CMD_LPF_HZ = 6.0f;
+static constexpr float RC_THROTTLE_THETA_REF_MAX_RAD = 0.10f;
+static constexpr float RC_STEER_TORQUE_MAX_NM = 0.35f;
 
 // ESC POS telemetry plausibility guard (expects wrapped radians in [0, 2*pi)).
 static constexpr float POS_RAW_MIN_RAD = -0.5f;
@@ -85,10 +110,16 @@ static float g_vel_filt_l = 0.0f;
 static float g_vel_filt_r = 0.0f;
 
 static float g_u_cmd_hold = 0.0f;
+static float g_x_ref_m = 0.0f;
+static float g_x_int_m_s = 0.0f;
+static bool g_x_ref_init = false;
+static uint32_t g_x_recenter_stable_since_us = 0u;
 static float g_last_d_l_rad = 0.0f;
 static float g_last_d_r_rad = 0.0f;
 static bool g_pos_range_ok = true;
 static bool g_pos_step_ok = true;
+static float g_rc_throttle_cmd_filt = 0.0f;
+static float g_rc_steer_cmd_filt = 0.0f;
 
 struct BalanceDiagEntry {
   uint32_t t_us;
@@ -106,12 +137,21 @@ struct BalanceDiagEntry {
   float imu_int_fb_y;
   float x_m;
   float x_dot;
+  float x_err_m;
+  float u_theta;
+  float u_x;
+  float u_i;
   float u_unsat;
   float u_cmd;
   float pos_l_raw;
   float pos_r_raw;
   float vel_l_raw;
   float vel_r_raw;
+  float rc_throttle_cmd;
+  float rc_steer_cmd;
+  float theta_ref_rad;
+  float tau_l_cmd;
+  float tau_r_cmd;
   uint16_t tare_eq_count;
   uint16_t tare_stable_count;
 };
@@ -127,6 +167,13 @@ static inline float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
   return v;
+}
+
+static inline float apply_deadband(float x, float deadband) {
+  const float d = clampf(deadband, 0.0f, 0.49f);
+  if (fabsf(x) <= d) return 0.0f;
+  const float sign = (x >= 0.0f) ? 1.0f : -1.0f;
+  return sign * ((fabsf(x) - d) / (1.0f - d));
 }
 
 static inline void diag_reset() {
@@ -167,7 +214,7 @@ static void diag_dump(const char *reason) {
     for (uint16_t i = 0u; i < g_diag_size; ++i) {
       const BalanceDiagEntry &e = g_diag_ring[(uint16_t)((start + i) % BALANCE_LOG_CAPACITY)];
       Serial.printf(
-          "{\"cmd\":\"BALANCE_TRACE\",\"trace_id\":%lu,\"i\":%u,\"t\":%lu,\"elapsed_us\":%lu,\"pitch_raw_rad\":%.6f,\"pitch_rate_raw\":%.6f,\"theta_eq_rad\":%.6f,\"theta_tared_rad\":%.6f,\"theta_dot\":%.6f,\"theta_dot_bias\":%.6f,\"imu_acc_mag_g\":%.6f,\"imu_accel_valid\":%u,\"imu_int_fb_y\":%.6f,\"x_m\":%.6f,\"x_dot\":%.6f,\"u_unsat\":%.6f,\"u\":%.6f,\"pos_l_raw\":%.6f,\"pos_r_raw\":%.6f,\"vel_l_raw\":%.6f,\"vel_r_raw\":%.6f,\"tare_eq_count\":%u,\"tare_stable_count\":%u,\"dt_us\":%lu,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
+          "{\"cmd\":\"BALANCE_TRACE\",\"trace_id\":%lu,\"i\":%u,\"t\":%lu,\"elapsed_us\":%lu,\"pitch_raw_rad\":%.6f,\"pitch_rate_raw\":%.6f,\"theta_eq_rad\":%.6f,\"theta_tared_rad\":%.6f,\"theta_dot\":%.6f,\"theta_dot_bias\":%.6f,\"imu_acc_mag_g\":%.6f,\"imu_accel_valid\":%u,\"imu_int_fb_y\":%.6f,\"x_m\":%.6f,\"x_dot\":%.6f,\"x_err_m\":%.6f,\"u_theta\":%.6f,\"u_x\":%.6f,\"u_i\":%.6f,\"u_unsat\":%.6f,\"u\":%.6f,\"pos_l_raw\":%.6f,\"pos_r_raw\":%.6f,\"vel_l_raw\":%.6f,\"vel_r_raw\":%.6f,\"rc_throttle_cmd\":%.6f,\"rc_steer_cmd\":%.6f,\"theta_ref_rad\":%.6f,\"tau_l_cmd\":%.6f,\"tau_r_cmd\":%.6f,\"tare_eq_count\":%u,\"tare_stable_count\":%u,\"dt_us\":%lu,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
           (unsigned long)g_trace_id,
           (unsigned int)i,
           (unsigned long)e.t_us,
@@ -183,12 +230,21 @@ static void diag_dump(const char *reason) {
           e.imu_int_fb_y,
           e.x_m,
           e.x_dot,
+          e.x_err_m,
+          e.u_theta,
+          e.u_x,
+          e.u_i,
           e.u_unsat,
           e.u_cmd,
           e.pos_l_raw,
           e.pos_r_raw,
           e.vel_l_raw,
           e.vel_r_raw,
+          e.rc_throttle_cmd,
+          e.rc_steer_cmd,
+          e.theta_ref_rad,
+          e.tau_l_cmd,
+          e.tau_r_cmd,
           (unsigned int)e.tare_eq_count,
           (unsigned int)e.tare_stable_count,
           (unsigned long)e.dt_us,
@@ -248,10 +304,16 @@ static inline void reset_balance_state() {
   g_vel_filt_r = 0.0f;
 
   g_u_cmd_hold = 0.0f;
+  g_x_ref_m = 0.0f;
+  g_x_int_m_s = 0.0f;
+  g_x_ref_init = false;
+  g_x_recenter_stable_since_us = 0u;
   g_last_d_l_rad = 0.0f;
   g_last_d_r_rad = 0.0f;
   g_pos_range_ok = true;
   g_pos_step_ok = true;
+  g_rc_throttle_cmd_filt = 0.0f;
+  g_rc_steer_cmd_filt = 0.0f;
   diag_reset();
 }
 
@@ -332,27 +394,32 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   const float dt_s = (dt_s_raw >= 0.0005f && dt_s_raw <= 0.01f) ? dt_s_raw : 0.001f;
 
   if (g_first_entry) {
-  g_first_entry = false;
-  g_start_us = now_us;
-  g_last_tx_us = 0u;
+    g_first_entry = false;
+    g_start_us = now_us;
+    g_last_tx_us = 0u;
     g_last_tare_wait_print_us = 0u;
-  g_theta_eq = 0.0f;
-  g_theta_sign_state = 0;
-  g_last_zero_cross_us = 0u;
-  g_zero_cross_arm_us = 0u;
-  g_theta_eq_accum = 0.0f;
+    g_theta_eq = 0.0f;
+    g_theta_sign_state = 0;
+    g_last_zero_cross_us = 0u;
+    g_zero_cross_arm_us = 0u;
+    g_theta_eq_accum = 0.0f;
     g_theta_dot_bias = 0.0f;
     g_theta_dot_bias_accum = 0.0f;
     g_theta_eq_count = 0u;
     g_tare_stable_count = 0u;
-  g_unwrap_init = false;
-  g_u_cmd_hold = 0.0f;
-  diag_reset();
-  Serial.printf("{\"cmd\":\"BALANCE_START\",\"send_torque\":%d,\"fixed_torque_test\":%d,\"fixed_torque_nm\":%.3f}\r\n",
-                (int)SEND_TORQUE,
-                BALANCE_FIXED_TORQUE_TEST ? 1 : 0,
-                BALANCE_FIXED_TORQUE_NM);
-}
+    g_unwrap_init = false;
+    g_u_cmd_hold = 0.0f;
+    g_x_ref_m = 0.0f;
+    g_x_int_m_s = 0.0f;
+    g_x_ref_init = false;
+    g_x_recenter_stable_since_us = 0u;
+    diag_reset();
+
+    Serial.printf("{\"cmd\":\"BALANCE_START\",\"send_torque\":%d,\"fixed_torque_test\":%d,\"fixed_torque_nm\":%.3f}\r\n",
+                  (int)SEND_TORQUE,
+                  BALANCE_FIXED_TORQUE_TEST ? 1 : 0,
+                  BALANCE_FIXED_TORQUE_NM);
+  }
 
   const bool imu_fresh = sup->imu.valid &&
                          ((uint32_t)(now_us - sup->imu.last_update_us) <= IMU_TIMEOUT_US);
@@ -447,10 +514,41 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   const float theta = sup->imu.pitch_rad - g_theta_eq;
   const float theta_dot = sup->imu.pitch_rate - g_theta_dot_bias;
+  const bool hold_mode = (sup->mode == SUP_MODE_BALANCE_HOLD);
+
+  float rc_throttle_cmd = 0.0f;
+  float rc_steer_cmd = 0.0f;
+  bool rc_throttle_valid = false;
+  bool rc_steer_valid = false;
+  if (!hold_mode) {
+    if (sup->user_rc_throttle_ch < sup->rc_count && sup->rc[sup->user_rc_throttle_ch].valid) {
+      rc_throttle_valid = true;
+      rc_throttle_cmd = clampf(sup->rc[sup->user_rc_throttle_ch].norm, -1.0f, 1.0f);
+      if (sup->user_rc_throttle_invert) rc_throttle_cmd = -rc_throttle_cmd;
+      rc_throttle_cmd = apply_deadband(rc_throttle_cmd, sup->user_rc_deadband);
+    }
+    if (sup->user_rc_steer_ch < sup->rc_count && sup->rc[sup->user_rc_steer_ch].valid) {
+      rc_steer_valid = true;
+      rc_steer_cmd = clampf(sup->rc[sup->user_rc_steer_ch].norm, -1.0f, 1.0f);
+      if (sup->user_rc_steer_invert) rc_steer_cmd = -rc_steer_cmd;
+      rc_steer_cmd = apply_deadband(rc_steer_cmd, sup->user_rc_deadband);
+    }
+    const float rc_alpha = dt_s / (dt_s + (1.0f / (2.0f * PI * RC_CMD_LPF_HZ)));
+    g_rc_throttle_cmd_filt += rc_alpha * (rc_throttle_cmd - g_rc_throttle_cmd_filt);
+    g_rc_steer_cmd_filt += rc_alpha * (rc_steer_cmd - g_rc_steer_cmd_filt);
+    if (!rc_throttle_valid) g_rc_throttle_cmd_filt *= 0.95f;
+    if (!rc_steer_valid) g_rc_steer_cmd_filt *= 0.95f;
+  } else {
+    // Hold mode explicitly ignores RC motion shaping.
+    g_rc_throttle_cmd_filt = 0.0f;
+    g_rc_steer_cmd_filt = 0.0f;
+  }
+  const float theta_ref = hold_mode ? 0.0f : (RC_THROTTLE_THETA_REF_MAX_RAD * g_rc_throttle_cmd_filt);
+  const float theta_err = theta - theta_ref;
 
   int8_t theta_sign = 0;
-  if (theta > ZERO_CROSS_HYST_RAD) theta_sign = 1;
-  else if (theta < -ZERO_CROSS_HYST_RAD) theta_sign = -1;
+  if (theta_err > ZERO_CROSS_HYST_RAD) theta_sign = 1;
+  else if (theta_err < -ZERO_CROSS_HYST_RAD) theta_sign = -1;
 
   if (theta_sign != 0) {
     if (g_theta_sign_state != 0 && theta_sign != g_theta_sign_state) {
@@ -470,6 +568,38 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   float x_wheel_m = 0.0f;
   float x_dot_m_s = 0.0f;
   update_wheel_unwrap(pos_l, pos_r, vel_l, vel_r, dt_s, &x_wheel_m, &x_dot_m_s);
+  if (!g_x_ref_init) {
+    // Lock position reference at balance start so "hold position" means
+    // return to this wheel-center location after disturbances.
+    g_x_ref_m = x_wheel_m;
+    g_x_ref_init = true;
+  }
+  // Position-hold error: positive when wheel center is behind reference.
+  // Using (ref - measured) here sets the x-channel control direction
+  // explicitly for restoring motion toward the locked reference.
+  const float x_pos_err_m = g_x_ref_m - x_wheel_m;
+  const float x_dot_err_m_s = -x_dot_m_s;
+
+  // In hold mode, allow a very slow x_ref recenter only after prolonged
+  // upright stability. This trims steady bias without fighting balance.
+  if (X_REF_RECENTER_ENABLE && hold_mode) {
+    const bool recenter_stable =
+        (fabsf(theta_err) <= X_REF_RECENTER_THETA_RAD) &&
+        (fabsf(theta_dot) <= X_REF_RECENTER_THETA_DOT_RAD_S) &&
+        (fabsf(x_dot_m_s) <= X_REF_RECENTER_XDOT_M_S);
+    if (recenter_stable) {
+      if (g_x_recenter_stable_since_us == 0u) {
+        g_x_recenter_stable_since_us = now_us;
+      } else if ((uint32_t)(now_us - g_x_recenter_stable_since_us) >= X_REF_RECENTER_STABLE_US) {
+        const float alpha = dt_s / (X_REF_RECENTER_TAU_S + dt_s);
+        g_x_ref_m += alpha * (x_wheel_m - g_x_ref_m);
+      }
+    } else {
+      g_x_recenter_stable_since_us = 0u;
+    }
+  } else {
+    g_x_recenter_stable_since_us = 0u;
+  }
 
   if (!BALANCE_FIXED_TORQUE_TEST && (!g_pos_range_ok || !g_pos_step_ok)) {
     Serial.printf(
@@ -489,21 +619,56 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     return;
   }
 
+  // Full-state control effort:
+  // - theta/theta_dot terms stabilize body tilt.
+  // - x_err/x_dot_err terms provide position-hold so the wheel pair returns
+  //   toward its centered location instead of drifting while "upright".
+  // - slow integral on x_pos_err rejects small steady-state bias torques.
+  // Tilt-priority gate: disable x channel when tilt recovery is active.
+  const bool x_hold_enabled =
+      (fabsf(theta_err) <= X_HOLD_ENABLE_THETA_RAD) &&
+      (fabsf(theta_dot) <= X_HOLD_ENABLE_THETA_DOT_RAD_S) &&
+      (fabsf(x_dot_m_s) <= X_HOLD_ENABLE_X_DOT_M_S);
+
+  if (POS_HOLD_KI > 0.0f) {
+    if (x_hold_enabled) {
+      g_x_int_m_s += x_pos_err_m * dt_s;
+      const float x_int_lim = POS_HOLD_I_CLAMP_NM / POS_HOLD_KI;
+      g_x_int_m_s = clampf(g_x_int_m_s, -x_int_lim, x_int_lim);
+    } else {
+      g_x_int_m_s *= X_HOLD_INT_LEAK_PER_STEP;
+    }
+  } else {
+    g_x_int_m_s = 0.0f;
+  }
+
+  const float u_x_i = x_hold_enabled
+                          ? clampf(POS_HOLD_KI * g_x_int_m_s,
+                                   -POS_HOLD_I_CLAMP_NM, POS_HOLD_I_CLAMP_NM)
+                          : 0.0f;
+  const float u_theta = -(K_DISC[0] * theta_err) * SAFETY_SCALE;
+  const float u_theta_dot = -(K_DISC[1] * theta_dot) * SAFETY_SCALE;
+  const float u_x = x_hold_enabled ? (-(K_DISC[2] * x_pos_err_m) * SAFETY_SCALE) : 0.0f;
+  const float u_x_dot = x_hold_enabled ? (-(K_DISC[3] * x_dot_err_m_s) * SAFETY_SCALE) : 0.0f;
+  const float u_i = -(u_x_i) * SAFETY_SCALE;
+  const float u_balance = u_theta + u_theta_dot + u_x + u_x_dot + u_i;
   const float u_model = BALANCE_FIXED_TORQUE_TEST
                             ? BALANCE_FIXED_TORQUE_NM
-                            : (-(K_DISC[0] * theta +
-                                 K_DISC[1] * theta_dot +
-                                 K_DISC[2] * x_wheel_m +
-                                 K_DISC[3] * x_dot_m_s) * SAFETY_SCALE);
+                            : u_balance;
+  const float u_steer = hold_mode ? 0.0f : (RC_STEER_TORQUE_MAX_NM * g_rc_steer_cmd_filt);
 
   if (tx_due) {
     float u_cmd = clampf(u_model, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+    float tau_l_cmd = clampf(-u_cmd + u_steer, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+    float tau_r_cmd = clampf( u_cmd + u_steer, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
     g_u_cmd_hold = u_cmd;
     g_last_tx_us = now_us;
 #if SEND_TORQUE
-    send_iqreq(-u_cmd, sup->esc[0].config.node_id, can1, can2);
-    send_iqreq(u_cmd, sup->esc[1].config.node_id, can1, can2);
+    send_iqreq(tau_l_cmd, sup->esc[0].config.node_id, can1, can2);
+    send_iqreq(tau_r_cmd, sup->esc[1].config.node_id, can1, can2);
 #else
+    tau_l_cmd = 0.0f;
+    tau_r_cmd = 0.0f;
     send_iqreq(0.0f, sup->esc[0].config.node_id, can1, can2);
     send_iqreq(0.0f, sup->esc[1].config.node_id, can1, can2);
 #endif
@@ -524,12 +689,21 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     e.imu_int_fb_y = sup->imu.mahony_int_fb_y;
     e.x_m = x_wheel_m;
     e.x_dot = x_dot_m_s;
+    e.x_err_m = x_pos_err_m;
+    e.u_theta = u_theta;
+    e.u_x = u_x;
+    e.u_i = u_i;
     e.u_unsat = u_model;
     e.u_cmd = g_u_cmd_hold;
     e.pos_l_raw = pos_l;
     e.pos_r_raw = pos_r;
     e.vel_l_raw = vel_l;
     e.vel_r_raw = vel_r;
+    e.rc_throttle_cmd = g_rc_throttle_cmd_filt;
+    e.rc_steer_cmd = g_rc_steer_cmd_filt;
+    e.theta_ref_rad = theta_ref;
+    e.tau_l_cmd = tau_l_cmd;
+    e.tau_r_cmd = tau_r_cmd;
     e.tare_eq_count = g_theta_eq_count;
     e.tare_stable_count = g_tare_stable_count;
     diag_push(e);

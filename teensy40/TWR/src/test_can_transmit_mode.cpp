@@ -190,7 +190,7 @@ static void print_end_of_run_summary(const Supervisor_typedef *sup,
       copy_iqreq_spike_times(g_iqreq_spikes_right, iq_r_spike_times, IQREQ_SPIKE_RING_SIZE);
 
   Serial.printf(
-      "{\"cmd\":\"CAN_TXQ_SUM\",\"attempts\":%lu,\"ok\":%lu,\"fail\":%lu,\"fail_pct\":%.3f,\"mode\":%d,\"tx_enable\":%d,\"tx_period_us\":%lu,\"tx_hz\":%.2f,\"rc_drive\":%d,\"rc_throttle_ch\":%u,\"rc_steer_ch\":%u,\"rc_deadband\":%.3f,\"rc_max_torque_nm\":%.3f,\"posvel_age_us\":%lu,\"can1_rx_reads\":%lu,\"can2_rx_reads\":%lu,\"rx_overflow\":%lu,"
+      "{\"cmd\":\"CAN_TXQ_SUM\",\"attempts\":%lu,\"ok\":%lu,\"fail\":%lu,\"fail_pct\":%.3f,\"mode\":%d,\"tx_enable\":%d,\"tx_period_us\":%lu,\"tx_hz\":%.2f,\"rc_drive\":%d,\"rc_throttle_ch\":%u,\"rc_steer_ch\":%u,\"rc_throttle_invert\":%d,\"rc_steer_invert\":%d,\"rc_deadband\":%.3f,\"rc_max_torque_nm\":%.3f,\"posvel_age_us\":%lu,\"can1_rx_reads\":%lu,\"can2_rx_reads\":%lu,\"rx_overflow\":%lu,"
       "\"iqreq_l_dt_count\":%lu,\"iqreq_l_dt_avg_us\":%lu,\"iqreq_l_dt_min_us\":%lu,\"iqreq_l_dt_p50_us\":%lu,\"iqreq_l_dt_p95_us\":%lu,\"iqreq_l_dt_p99_us\":%lu,\"iqreq_l_dt_max_us\":%lu,"
       "\"iqreq_r_dt_count\":%lu,\"iqreq_r_dt_avg_us\":%lu,\"iqreq_r_dt_min_us\":%lu,\"iqreq_r_dt_p50_us\":%lu,\"iqreq_r_dt_p95_us\":%lu,\"iqreq_r_dt_p99_us\":%lu,\"iqreq_r_dt_max_us\":%lu,"
       "\"iqreq_dt_spike_threshold_us\":%lu,\"iqreq_l_dt_spike_count\":%lu,\"iqreq_r_dt_spike_count\":%lu}\r\n",
@@ -205,6 +205,8 @@ static void print_end_of_run_summary(const Supervisor_typedef *sup,
       sup->user_rc_drive_enable ? 1 : 0,
       (unsigned int)(sup->user_rc_throttle_ch + 1u),
       (unsigned int)(sup->user_rc_steer_ch + 1u),
+      sup->user_rc_throttle_invert ? 1 : 0,
+      sup->user_rc_steer_invert ? 1 : 0,
       sup->user_rc_deadband,
       sup->user_rc_max_torque_nm,
       (unsigned long)posvel_age_us,
@@ -472,8 +474,10 @@ void test_can_transmit_mode(Supervisor_typedef *sup,
   bool rc_steer_valid = false;
   const float rc_throttle_raw = rc_channel_norm(sup, sup->user_rc_throttle_ch, &rc_throttle_valid);
   const float rc_steer_raw = rc_channel_norm(sup, sup->user_rc_steer_ch, &rc_steer_valid);
-  const float rc_throttle = apply_deadband(rc_throttle_raw, sup->user_rc_deadband);
-  const float rc_steer = apply_deadband(rc_steer_raw, sup->user_rc_deadband);
+  const float rc_throttle_signed = sup->user_rc_throttle_invert ? -rc_throttle_raw : rc_throttle_raw;
+  const float rc_steer_signed = sup->user_rc_steer_invert ? -rc_steer_raw : rc_steer_raw;
+  const float rc_throttle = apply_deadband(rc_throttle_signed, sup->user_rc_deadband);
+  const float rc_steer = apply_deadband(rc_steer_signed, sup->user_rc_deadband);
   const bool rc_ok = rc_throttle_valid && rc_steer_valid;
 
   float tau_l_cmd = sup->user_test_tau_left;
@@ -522,14 +526,14 @@ void test_can_transmit_mode(Supervisor_typedef *sup,
     const uint16_t raw_s = (ch_s < sup->rc_count) ? sup->rc[ch_s].raw_us : 0u;
     Serial.printf(
         "{\"cmd\":\"RC_TEST\",\"t\":%lu,\"tx_enable\":%d,\"tx_hz\":%.2f,"
-        "\"throttle_ch\":%u,\"throttle_valid\":%d,\"throttle_raw_us\":%u,\"throttle_norm\":%.3f,"
-        "\"steer_ch\":%u,\"steer_valid\":%d,\"steer_raw_us\":%u,\"steer_norm\":%.3f,"
+        "\"throttle_ch\":%u,\"throttle_invert\":%d,\"throttle_valid\":%d,\"throttle_raw_us\":%u,\"throttle_norm\":%.3f,"
+        "\"steer_ch\":%u,\"steer_invert\":%d,\"steer_valid\":%d,\"steer_raw_us\":%u,\"steer_norm\":%.3f,"
         "\"tau_l\":%.3f,\"tau_r\":%.3f}\r\n",
         (unsigned long)now_us,
         sup->user_tx_enable ? 1 : 0,
         (tx_period_us > 0u) ? (1000000.0f / (float)tx_period_us) : 0.0f,
-        (unsigned int)(ch_t + 1u), rc_throttle_valid ? 1 : 0, (unsigned int)raw_t, rc_throttle,
-        (unsigned int)(ch_s + 1u), rc_steer_valid ? 1 : 0, (unsigned int)raw_s, rc_steer,
+        (unsigned int)(ch_t + 1u), sup->user_rc_throttle_invert ? 1 : 0, rc_throttle_valid ? 1 : 0, (unsigned int)raw_t, rc_throttle,
+        (unsigned int)(ch_s + 1u), sup->user_rc_steer_invert ? 1 : 0, rc_steer_valid ? 1 : 0, (unsigned int)raw_s, rc_steer,
         tau_l_cmd, tau_r_cmd);
   }
 

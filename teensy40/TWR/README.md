@@ -91,3 +91,12 @@ python3 /Users/owhite/balancing-robot-notes/teensy40/TWR/IMU_test.py \
 
 ![IMU pitch-rate RMS plot](vibe_testing1.png)
 Plot shows motors  running from 15-30s, a bump on the table, and running motors at 40-50s
+
+## Control Sign Issue (Open)
+
+- During balance bring-up, we observed behavior consistent with a possible mis-signed translational contribution in the control law (most likely in `x` and/or `x_dot` terms), while tilt-related terms appeared mostly directionally correct.
+- Symptom pattern:
+  - The robot can momentarily stabilize near tare.
+  - It then develops drift and sometimes applies torque that appears to reinforce translational error instead of damping it.
+- Practical implication:
+  - Before integrating RC references, we should re-validate sign conventions for wheel unwrap, `x`, `x_dot`, and wheel torque mixing (`tau_L`, `tau_R`) under a controlled test sequence.

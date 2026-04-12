@@ -80,7 +80,8 @@ struct IMUState {
 enum SupervisorMode {
   SUP_MODE_IDLE = 0,   // System idle, no active control
   SUP_VERIFY_ANGLE,    // IMU verification: zero torque, report pitch/rate
-  SUP_MODE_BALANCE_TWR,
+  SUP_MODE_BALANCE_HOLD, // Balance with position-hold only (no RC motion commands)
+  SUP_MODE_BALANCE_TWR,  // Balance with RC motion shaping enabled
   SUP_MODE_TEST_CAN
 };
 
@@ -106,8 +107,10 @@ struct Supervisor_typedef {
   float user_verify_tau_left = 2.0f;     // left torque during verify+motor mode
   float user_verify_tau_right = -2.0f;   // right torque during verify+motor mode
   bool user_rc_drive_enable = false;     // if true, TEST_CAN uses RC throttle/steering torque mixing
-  uint8_t user_rc_throttle_ch = 0u;      // 0-based index into rc[] array
-  uint8_t user_rc_steer_ch = 1u;         // 0-based index into rc[] array
+  uint8_t user_rc_throttle_ch = 1u;      // 0-based index into rc[] array (RC_INPUT2 default)
+  uint8_t user_rc_steer_ch = 0u;         // 0-based index into rc[] array (RC_INPUT1 default)
+  bool user_rc_throttle_invert = true;   // true: lower PWM => positive throttle command
+  bool user_rc_steer_invert = true;      // true: lower PWM => positive steer command
   float user_rc_deadband = 0.05f;        // deadband in normalized stick units
   float user_rc_max_torque_nm = 1.0f;    // max absolute torque requested by RC mixer
   uint32_t user_pulse_us    = 1000;   // duration of pulse (µs)
