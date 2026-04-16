@@ -27,7 +27,28 @@ static constexpr uint8_t RC_PIN_COUNT = sizeof(rc_pins) / sizeof(rc_pins[0]);
 // -------------------- CAN Communication --------------------
 FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> Can1;
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can2;
-CANBuffer canRxBuf;  // ✅ holds buffer + link_ok
+CANBuffer canRxBuf1;  // CAN1 software RX queue
+CANBuffer canRxBuf2;  // CAN2 software RX queue
+
+#if CAN_RX_USE_ISR
+// CAN reliability improvement:
+// Push RX frames from FIFO ISR callbacks into software queues immediately.
+static void can1_on_receive(const CAN_message_t &msg) {
+  canNoteBusRead(1u);
+  canNotePosvelIngress(msg);
+  if (!canBufferPush(canRxBuf1, msg, 1u)) {
+    canNoteRxOverflow();
+  }
+}
+
+static void can2_on_receive(const CAN_message_t &msg) {
+  canNoteBusRead(2u);
+  canNotePosvelIngress(msg);
+  if (!canBufferPush(canRxBuf2, msg, 2u)) {
+    canNoteRxOverflow();
+  }
+}
+#endif
 
 // -------------------- Tone / Pushbutton --------------------
 static TonePlayer g_tone;
@@ -41,12 +62,16 @@ PushButton g_button(PUSHBUTTON_PIN, true, 50000u);
 ICM42688 imu(SPI, CS_PIN);
 static volatile bool g_imu_data_ready = false;
 static constexpr uint32_t CAN_POSVEL_RX_TIMEOUT_US = 400000u;
+static constexpr uint32_t CAN_TEST_RUN_DEFAULT_US = 30000000u;  // 30 seconds
 static constexpr uint32_t BALANCE_BUTTON_RUN_US = 0u;  // 0 = no auto-timeout
 static constexpr uint32_t BALANCE_BUTTON_STOP_GUARD_US = 800000u; // Ignore stop press for first 0.8 s.
 static constexpr float BALANCE_ENTRY_TARGET_RAD = -0.020f;
 static constexpr float BALANCE_ENTRY_TOL_RAD = 0.008f;
 static uint32_t g_balance_mode_enter_us = 0u;
 static SupervisorMode g_prev_mode_for_exit_tweet = SUP_MODE_IDLE;
+// Latch "entry-ready" while button is held so a tiny motion at release
+// doesn't falsely reject entering balance/tare mode.
+static bool g_button_entry_ready_latched = false;
 // Runtime decimated printing can perturb timing; keep off for measurement runs.
 // Uncomment to ignore pushbutton state transitions.
 // #define PB_OVERRIDE
@@ -59,15 +84,40 @@ static void imu_data_ready_isr() {
 static float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;
 static float integralFBx = 0.0f, integralFBy = 0.0f, integralFBz = 0.0f;
 static const float twoKp = 2.0f * 0.5f;  // Kp = 0.5
-static const float twoKi = 2.0f * 0.1f;  // Ki = 0.1
+// Keep Mahony integral enabled to reject slow gyro bias drift.
+// Combined with bump holdoff below, this preserves long-term attitude lock
+// without aggressively integrating during translational shocks.
+static constexpr bool IMU_MAHONY_INTEGRAL_ENABLE = true;
+static constexpr float IMU_MAHONY_KI = 0.08f;  // was 0.10f baseline
+static const float twoKi = IMU_MAHONY_INTEGRAL_ENABLE ? (2.0f * IMU_MAHONY_KI) : 0.0f;
+static constexpr float IMU_MAHONY_INT_CLAMP_RAD_S = 0.35f;
+static constexpr float IMU_MAHONY_INT_DECAY_WHEN_UNGATED = 0.9995f;
 // Accelerometer trust window for Mahony correction. Narrower gating reduces
 // estimator kicks during brief dynamic acceleration.
 static constexpr float ACCEL_CORR_FULL_ERR_G = 0.02f;
 static constexpr float ACCEL_CORR_MAX_ERR_G = 0.06f;
+// During balance mode, suppress accel correction briefly after high |a|-1
+// events to avoid correcting attitude from translational shocks (table bumps).
+static constexpr bool IMU_ACCEL_BUMP_HOLDOFF_ENABLE = true;
+static constexpr float IMU_ACCEL_BUMP_TRIGGER_ERR_G = 0.05f;
+static constexpr uint32_t IMU_ACCEL_BUMP_HOLDOFF_US = 120000u;
+// In active balance, only trust accelerometer corrections when the platform is
+// dynamically quiet. This avoids slow equilibrium walk from translational
+// acceleration being interpreted as tilt.
+static constexpr bool IMU_BALANCE_ACCEL_ONLY_WHEN_QUIET = true;
+static constexpr float IMU_BALANCE_QUIET_PITCH_RATE_MAX_RAD_S = 0.35f;
+static constexpr float IMU_BALANCE_QUIET_WHEEL_VEL_MAX_RAD_S = 4.0f;
+// Tuning notes:
+// - Lower IMU_ACCEL_BUMP_TRIGGER_ERR_G => more aggressive bump detection.
+// - Higher IMU_ACCEL_BUMP_HOLDOFF_US   => longer gyro-only recovery window.
+// - Re-enable IMU_MAHONY_INTEGRAL_ENABLE once behavior is stable; integral
+//   can reduce long-term bias, but may accumulate error after disturbances.
+static uint32_t g_imu_accel_holdoff_until_us = 0u;
 
 static void mahony_update_imu(float gx, float gy, float gz,
                               float ax, float ay, float az,
-                              float dt_s) {
+                              float dt_s,
+                              bool allow_accel_correction) {
   float acc_mag = sqrtf(ax * ax + ay * ay + az * az);
   float accel_corr_gain = 0.0f;
 
@@ -88,7 +138,7 @@ static void mahony_update_imu(float gx, float gy, float gz,
 
   float ex = 0.0f, ey = 0.0f, ez = 0.0f;
 
-  if (accel_corr_gain > 0.0f) {
+  if (accel_corr_gain > 0.0f && allow_accel_correction) {
     float vx = 2.0f * (q1 * q3 - q0 * q2);
     float vy = 2.0f * (q0 * q1 + q2 * q3);
     float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
@@ -104,6 +154,9 @@ static void mahony_update_imu(float gx, float gy, float gz,
       integralFBx += twoKi * ex * dt_s;
       integralFBy += twoKi * ey * dt_s;
       integralFBz += twoKi * ez * dt_s;
+      integralFBx = constrain(integralFBx, -IMU_MAHONY_INT_CLAMP_RAD_S, IMU_MAHONY_INT_CLAMP_RAD_S);
+      integralFBy = constrain(integralFBy, -IMU_MAHONY_INT_CLAMP_RAD_S, IMU_MAHONY_INT_CLAMP_RAD_S);
+      integralFBz = constrain(integralFBz, -IMU_MAHONY_INT_CLAMP_RAD_S, IMU_MAHONY_INT_CLAMP_RAD_S);
       gx += integralFBx;
       gy += integralFBy;
       gz += integralFBz;
@@ -115,7 +168,15 @@ static void mahony_update_imu(float gx, float gy, float gz,
     gy += twoKp * ey;
     gz += twoKp * ez;
   } else {
-    integralFBx = integralFBy = integralFBz = 0.0f;
+    // During accel holdoff / out-of-gate windows, keep learned bias estimate
+    // with slow decay instead of hard reset to avoid apparent attitude walk.
+    if (twoKi > 0.0f) {
+      integralFBx *= IMU_MAHONY_INT_DECAY_WHEN_UNGATED;
+      integralFBy *= IMU_MAHONY_INT_DECAY_WHEN_UNGATED;
+      integralFBz *= IMU_MAHONY_INT_DECAY_WHEN_UNGATED;
+    } else {
+      integralFBx = integralFBy = integralFBz = 0.0f;
+    }
   }
 
   gx *= 0.5f * dt_s;
@@ -153,12 +214,29 @@ static void update_supervisor_imu(ICM42688 &imu_dev,
   float acc_mag = sqrtf(ax * ax + ay * ay + az * az);
   const float acc_err_g = fabsf(acc_mag - 1.0f);
   uint8_t accel_valid = (acc_err_g <= ACCEL_CORR_MAX_ERR_G) ? 1u : 0u;
+  const bool in_balance_mode =
+      (sup.mode == SUP_MODE_BALANCE_HOLD) || (sup.mode == SUP_MODE_BALANCE_TWR);
+  if (IMU_ACCEL_BUMP_HOLDOFF_ENABLE && in_balance_mode &&
+      acc_err_g > IMU_ACCEL_BUMP_TRIGGER_ERR_G) {
+    // Refresh holdoff on every detected bump-like sample.
+    g_imu_accel_holdoff_until_us = now_us + IMU_ACCEL_BUMP_HOLDOFF_US;
+  }
+  const bool allow_accel_correction =
+      !(IMU_ACCEL_BUMP_HOLDOFF_ENABLE && in_balance_mode &&
+        now_us < g_imu_accel_holdoff_until_us);
+  const bool quiet_for_balance_accel =
+      (fabsf(imu_dev.gyrY() * DEG_TO_RAD) <= IMU_BALANCE_QUIET_PITCH_RATE_MAX_RAD_S) &&
+      (fabsf(sup.esc[0].state.vel_rad_s) <= IMU_BALANCE_QUIET_WHEEL_VEL_MAX_RAD_S) &&
+      (fabsf(sup.esc[1].state.vel_rad_s) <= IMU_BALANCE_QUIET_WHEEL_VEL_MAX_RAD_S);
+  const bool allow_accel_correction_final =
+      allow_accel_correction &&
+      (!in_balance_mode || !IMU_BALANCE_ACCEL_ONLY_WHEN_QUIET || quiet_for_balance_accel);
 
   float gx = imu_dev.gyrX() * DEG_TO_RAD;
   float gy = imu_dev.gyrY() * DEG_TO_RAD;
   float gz = imu_dev.gyrZ() * DEG_TO_RAD;
 
-  mahony_update_imu(gx, gy, gz, ax, ay, az, dt_s);
+  mahony_update_imu(gx, gy, gz, ax, ay, az, dt_s, allow_accel_correction_final);
 
   float pitch_rad = asinf(2.0f * (q0 * q2 - q3 * q1));
   float pitch_rate_raw = gy;
@@ -218,16 +296,66 @@ static inline bool is_balance_mode(SupervisorMode m) {
   return (m == SUP_MODE_BALANCE_HOLD) || (m == SUP_MODE_BALANCE_TWR);
 }
 
+static const char* mode_to_str(SupervisorMode mode) {
+  switch (mode) {
+    case SUP_MODE_IDLE: return "SUP_MODE_IDLE";
+    case SUP_VERIFY_ANGLE: return "SUP_VERIFY_ANGLE";
+    case SUP_MODE_BALANCE_HOLD: return "SUP_MODE_BALANCE_HOLD";
+    case SUP_MODE_BALANCE_TWR: return "SUP_MODE_BALANCE_TWR";
+    case SUP_MODE_TEST_CAN: return "SUP_MODE_TEST_CAN";
+    default: return "SUP_MODE_UNKNOWN";
+  }
+}
+
 void balance_zero_cross_tweet(void) {
   tone_start(&g_tone, ZERO_CROSS_BEEP_HZ, ZERO_CROSS_BEEP_MS, ZERO_CROSS_BEEP_GAP_MS);
 }
 
 static void process_serial_line(const char *line) {
+  uint32_t run_s = 0u;
+
   if (line == nullptr) return;
 
-  if (strcmp(line, "run") == 0) {
+  if (strcmp(line, "run") == 0 || sscanf(line, "run %lu", &run_s) == 1) {
+    const SupervisorMode prev_mode = supervisor.mode;
+    const bool restart = (prev_mode == SUP_MODE_TEST_CAN);
+    uint32_t run_us = CAN_TEST_RUN_DEFAULT_US;
+    if (run_s > 0u) {
+      const uint64_t requested_us = (uint64_t)run_s * 1000000ull;
+      run_us = (requested_us > UINT32_MAX) ? UINT32_MAX : (uint32_t)requested_us;
+    }
     tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canRxBuf.overflow_count = 0;
+    canResetPosvelStats();
+    canResetRuntimeStats();
+    test_can_transmit_mode_request_restart();
+    canRxBuf1.overflow_count = 0;
+    canRxBuf2.overflow_count = 0;
+    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
+      supervisor.esc_alive_false_count[i] = 0u;
+    }
+    // Preserve current TX enable state so "tx off" is honored across runs.
+    supervisor.user_total_us = run_us;
+    supervisor.user_rc_drive_enable = false;
+    supervisor.mode = SUP_MODE_TEST_CAN;
+    g_balance_mode_enter_us = 0u;
+    Serial.printf(
+        "{\"cmd\":\"USER_RUN_REQUEST\",\"ok\":1,\"mode_from\":\"%s\",\"mode_to\":\"%s\",\"restart\":%d,\"run_us\":%lu,\"run_s\":%lu,\"tx_enable\":%d,\"tx_period_us\":%lu}\r\n",
+        mode_to_str(prev_mode),
+        mode_to_str(supervisor.mode),
+        restart ? 1 : 0,
+        (unsigned long)supervisor.user_total_us,
+        (unsigned long)(supervisor.user_total_us / 1000000u),
+        supervisor.user_tx_enable ? 1 : 0,
+        (unsigned long)supervisor.user_tx_period_us);
+    return;
+  }
+
+  if (strcmp(line, "balance run") == 0) {
+    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
+    canResetPosvelStats();
+    canResetRuntimeStats();
+    canRxBuf1.overflow_count = 0;
+    canRxBuf2.overflow_count = 0;
     for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
       supervisor.esc_alive_false_count[i] = 0u;
     }
@@ -247,7 +375,8 @@ static void process_serial_line(const char *line) {
 
   if (strcmp(line, "rc run") == 0) {
     tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canRxBuf.overflow_count = 0;
+    canRxBuf1.overflow_count = 0;
+    canRxBuf2.overflow_count = 0;
     for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
       supervisor.esc_alive_false_count[i] = 0u;
     }
@@ -346,7 +475,8 @@ static void process_serial_line(const char *line) {
 
   if (strcmp(line, "motor") == 0) {
     tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canRxBuf.overflow_count = 0;
+    canRxBuf1.overflow_count = 0;
+    canRxBuf2.overflow_count = 0;
     for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
       supervisor.esc_alive_false_count[i] = 0u;
     }
@@ -390,7 +520,10 @@ static void process_serial_line(const char *line) {
   }
 
   if (strcmp(line, "stats reset") == 0) {
-    canRxBuf.overflow_count = 0;
+    canResetPosvelStats();
+    canResetRuntimeStats();
+    canRxBuf1.overflow_count = 0;
+    canRxBuf2.overflow_count = 0;
     for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
       supervisor.esc_alive_false_count[i] = 0u;
     }
@@ -471,14 +604,26 @@ void setup() {
   Can1.setTX(CAN1_PINSEL);
   Can1.begin();
   Can1.setBaudRate(1000000);
+  // CAN reliability improvement:
+  // FIFO + IRQ receive path reduces loop-latency-induced drops.
   Can1.enableFIFO();
+#if CAN_RX_USE_ISR
+  Can1.enableFIFOInterrupt();
+  Can1.onReceive(can1_on_receive);
+#endif
 
   // CAN2 default routing on Teensy 4.0: RX=pin 0, TX=pin 1.
   Can2.setRX(CAN2_PINSEL);
   Can2.setTX(CAN2_PINSEL);
   Can2.begin();
   Can2.setBaudRate(1000000);
+  // CAN reliability improvement:
+  // Mirror CAN1 FIFO + IRQ setup so both buses have symmetric RX behavior.
   Can2.enableFIFO();
+#if CAN_RX_USE_ISR
+  Can2.enableFIFOInterrupt();
+  Can2.onReceive(can2_on_receive);
+#endif
   pinMode(CAN_STB, OUTPUT);
   digitalWrite(CAN_STB, LOW);
 
@@ -494,8 +639,11 @@ void setup() {
   g_prev_mode_for_exit_tweet = supervisor.mode;
   supervisor.user_total_us = 0;
   supervisor.user_tx_enable = true;
-  supervisor.user_tx_period_us = 4000;  // default 250 Hz command TX
-  canRxBuf.overflow_count = 0;
+  supervisor.user_tx_period_us = 2000;  // default 500 Hz command TX
+  canResetPosvelStats();
+  canResetRuntimeStats();
+  canRxBuf1.overflow_count = 0;
+  canRxBuf2.overflow_count = 0;
 
   // ---- Control tick ISR ----
   g_ctrlTimer.priority(CONTROL_LOOP_PRIORITY);
@@ -551,21 +699,47 @@ void loop() {
   }
 
   CAN_message_t msg;
+#if CAN_RX_USE_ISR
+  // CAN reliability improvement:
+  // Dispatch queued FlexCAN callbacks every loop so ISR-fed FIFO data drains promptly.
+  const uint32_t can1_events_us = micros();
+  canNoteEventsDispatch(1u, can1_events_us);
+  Can1.events();
+  const uint32_t can2_events_us = micros();
+  canNoteEventsDispatch(2u, can2_events_us);
+  Can2.events();
+#else
+  const uint32_t can1_poll_us = micros();
+  canNoteEventsDispatch(1u, can1_poll_us);
   while (Can1.read(msg)) {
     canNoteBusRead(1u);
-    if (!canBufferPush(canRxBuf, msg, 1u)) {
+    canNotePosvelIngress(msg);
+    if (!canBufferPush(canRxBuf1, msg, 1u)) {
       canNoteRxOverflow();
     }
   }
+  const uint32_t can2_poll_us = micros();
+  canNoteEventsDispatch(2u, can2_poll_us);
   while (Can2.read(msg)) {
     canNoteBusRead(2u);
-    if (!canBufferPush(canRxBuf, msg, 2u)) {
+    canNotePosvelIngress(msg);
+    if (!canBufferPush(canRxBuf2, msg, 2u)) {
       canNoteRxOverflow();
     }
   }
+#endif
   uint8_t rx_bus = 0u;
-  while (canBufferPop(canRxBuf, msg, &rx_bus)) {
-    handleCANMessage(msg, rx_bus);
+  while (true) {
+    bool popped_any = false;
+    if (canBufferPop(canRxBuf1, msg, &rx_bus)) {
+      handleCANMessage(msg, rx_bus);
+      popped_any = true;
+    }
+    if (canBufferPop(canRxBuf2, msg, &rx_bus)) {
+      handleCANMessage(msg, rx_bus);
+      popped_any = true;
+    }
+    if (!popped_any) break;
   }
 
   uint32_t now_us = micros();
@@ -580,6 +754,12 @@ void loop() {
   // - While button held in idle: ON only when pitch is near entry target.
   // - Other modes: link-health indicator.
   const bool entry_ready_now = balance_entry_angle_ready(supervisor);
+  const bool button_raw_pressed = (g_button.readRaw() == PB_PRESSED);
+  if (supervisor.mode == SUP_MODE_IDLE && button_raw_pressed && entry_ready_now) {
+    g_button_entry_ready_latched = true;
+  } else if (supervisor.mode != SUP_MODE_IDLE) {
+    g_button_entry_ready_latched = false;
+  }
   if (supervisor.mode == SUP_MODE_IDLE) {
     if (g_button.getState() == PB_PRESSED && entry_ready_now) {
       led_set_state(&g_led_green, LED_ON_CONTINUOUS);
@@ -587,7 +767,8 @@ void loop() {
       led_set_state(&g_led_green, LED_OFF);
     }
   } else {
-    led_set_state(&g_led_green, canRxBuf.link_ok ? LED_ON_CONTINUOUS : LED_BLINK_SLOW);
+    const bool can_link_ok = canRxBuf1.link_ok || canRxBuf2.link_ok;
+    led_set_state(&g_led_green, can_link_ok ? LED_ON_CONTINUOUS : LED_BLINK_SLOW);
   }
   led_update(&g_led_green, now_us);
 
@@ -608,12 +789,12 @@ void loop() {
           supervisor.imu.pitch_rate_raw * (180.0f / PI));
     }
     else if (pb_state == PB_RELEASED) {
-      if (!g_button.isArmed()) {
-        g_button.clearChanged();
-        return;
-      }
 	      SupervisorMode balance_mode = SUP_MODE_BALANCE_HOLD;
 	      if (supervisor.mode == balance_mode) {
+          if (!g_button.isArmed()) {
+            g_button.clearChanged();
+            return;
+          }
           const uint32_t since_enter_us = now_us - g_balance_mode_enter_us;
           if (since_enter_us < BALANCE_BUTTON_STOP_GUARD_US) {
             Serial.printf("{\"cmd\":\"BUTTON_IGNORED\",\"reason\":\"start_guard\",\"since_enter_us\":%lu,\"guard_us\":%lu}\r\n",
@@ -630,10 +811,12 @@ void loop() {
           supervisor.user_total_us = 0u;
           Serial.printf("{\"cmd\":\"BUTTON_IDLE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\"}\r\n");
           Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"button_stop\"}\r\n");
-	        } else if (supervisor.mode == SUP_MODE_IDLE) {
+	    } else if (supervisor.mode == SUP_MODE_IDLE) {
 	          const bool ready_release = balance_entry_angle_ready(supervisor);
-          if (ready_release) {
-            canRxBuf.overflow_count = 0;
+            const bool ready_latched = g_button_entry_ready_latched;
+          if (ready_release || ready_latched) {
+            canRxBuf1.overflow_count = 0;
+            canRxBuf2.overflow_count = 0;
             for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
               supervisor.esc_alive_false_count[i] = 0u;
             }
@@ -648,18 +831,21 @@ void loop() {
                 supervisor.imu.pitch_rad,
                 BALANCE_ENTRY_TARGET_RAD,
                 BALANCE_ENTRY_TOL_RAD);
+            g_button_entry_ready_latched = false;
           } else {
             Serial.printf(
-                "{\"cmd\":\"BUTTON_START_REJECT\",\"reason\":\"angle_not_ready\",\"imu_valid\":%d,\"pitch_raw_rad\":%.6f,\"target_rad\":%.6f,\"tol_rad\":%.6f}\r\n",
+                "{\"cmd\":\"BUTTON_START_REJECT\",\"reason\":\"angle_not_ready\",\"imu_valid\":%d,\"pitch_raw_rad\":%.6f,\"target_rad\":%.6f,\"tol_rad\":%.6f,\"entry_ready_latched\":%d}\r\n",
                 supervisor.imu.valid ? 1 : 0,
                 supervisor.imu.pitch_rad,
                 BALANCE_ENTRY_TARGET_RAD,
-                BALANCE_ENTRY_TOL_RAD);
+                BALANCE_ENTRY_TOL_RAD,
+                ready_latched ? 1 : 0);
 	          }
           } else {
             Serial.printf("{\"cmd\":\"BUTTON_IGNORED\",\"reason\":\"unsupported_mode\",\"mode\":%d}\r\n",
                           (int)supervisor.mode);
 		      }
+        g_button_entry_ready_latched = false;
         g_button.clearArmed();
 	    }
     g_button.clearChanged();

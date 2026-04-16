@@ -10,7 +10,7 @@
 #define SEND_TORQUE 1
 #endif
 
-// Baseline V1: simple full-state LQR at fixed 250 Hz command cadence.
+// Baseline V1: simple full-state LQR at fixed 500 Hz command cadence.
 // State ordering: [theta, theta_dot, x_wheel, x_dot]^T
 // Top-down shaped retune:
 // - more wheel-position centering authority (Kx)
@@ -21,6 +21,10 @@ static constexpr float K_DISC[4] = {
     1.00f,   // K_x      -> position-hold (wheel center return)
     0.35f    // K_x_dot  -> damping on platform translation
 };
+// Diagnostic isolation mode:
+// true  -> disable x-position hold channel to validate tare/IMU equilibrium.
+// false -> full 4-state balance + position-hold behavior.
+static constexpr bool BALANCE_TARE_VALIDATION_MODE = false;
 // Slow integral action on wheel-position error for bias rejection.
 // This helps hold a fixed wheel position in the presence of small constant
 // offsets (IMU bias, motor mismatch, asymmetrical friction).
@@ -62,7 +66,9 @@ static constexpr float BALANCE_FIXED_TORQUE_NM = 1.0f;
 static constexpr uint32_t IMU_TIMEOUT_US = 20000u;
 static constexpr uint32_t ESC_TIMEOUT_US = 20000u;
 static constexpr uint16_t THETA_EQ_SAMPLES = 200u;
-static constexpr uint32_t BALANCE_TX_PERIOD_US = 4000u; // 250 Hz
+// CAN reliability improvement baseline:
+// Keep balance-mode IQREQ cadence aligned with stable 500 Hz command profile.
+static constexpr uint32_t BALANCE_TX_PERIOD_US = 2000u; // 500 Hz
 static constexpr uint32_t BALANCE_LOG_SECONDS = 10u;
 static constexpr uint32_t BALANCE_LOG_HZ = 250u;
 static constexpr uint32_t BALANCE_LOG_CAPACITY = BALANCE_LOG_SECONDS * BALANCE_LOG_HZ;
@@ -80,6 +86,10 @@ static constexpr uint32_t ZERO_CROSS_ARM_DELAY_US = 2000000u;
 static constexpr float RC_CMD_LPF_HZ = 6.0f;
 static constexpr float RC_THROTTLE_THETA_REF_MAX_RAD = 0.10f;
 static constexpr float RC_STEER_TORQUE_MAX_NM = 0.35f;
+// Virtual axle synchronization terms to reduce heading arc/drift.
+// Isolation test: keep disabled while investigating slow equilibrium drift.
+static constexpr float K_YAW_P = 0.0f; // Torque per radian of heading error
+static constexpr float K_YAW_D = 0.0f; // Damping for yaw-rate error
 
 // ESC POS telemetry plausibility guard (expects wrapped radians in [0, 2*pi)).
 static constexpr float POS_RAW_MIN_RAD = -0.5f;
@@ -89,6 +99,9 @@ static constexpr float POS_STEP_MAX_RAD = 0.5f;
 static bool g_first_entry = true;
 static uint32_t g_start_us = 0u;
 static uint32_t g_last_tx_us = 0u;
+static uint32_t g_tx_attempts = 0u;
+static uint32_t g_tx_ok = 0u;
+static uint32_t g_tx_fail = 0u;
 static uint32_t g_last_tare_wait_print_us = 0u;
 static int8_t g_theta_sign_state = 0;
 static uint32_t g_last_zero_cross_us = 0u;
@@ -108,6 +121,7 @@ static float g_unwrap_l = 0.0f;
 static float g_unwrap_r = 0.0f;
 static float g_vel_filt_l = 0.0f;
 static float g_vel_filt_r = 0.0f;
+static float g_yaw_ref = 0.0f;
 
 static float g_u_cmd_hold = 0.0f;
 static float g_x_ref_m = 0.0f;
@@ -176,6 +190,143 @@ static inline float apply_deadband(float x, float deadband) {
   return sign * ((fabsf(x) - d) / (1.0f - d));
 }
 
+static void print_min_ingress_seq_summary(const Supervisor_typedef *sup) {
+  if (sup == nullptr) return;
+
+  const uint8_t left_id = (sup->esc_count > 0u) ? sup->esc[0].config.node_id : 0u;
+  const uint8_t right_id = (sup->esc_count > 1u) ? sup->esc[1].config.node_id : 0u;
+
+  PosvelSeqStats left_cb{};
+  PosvelSeqStats right_cb{};
+  PosvelSeqStats left_main{};
+  PosvelSeqStats right_main{};
+
+  const bool have_left_cb = (left_id > 0u) ? canGetPosvelIngressSeqStats(left_id, left_cb) : false;
+  const bool have_right_cb = (right_id > 0u) ? canGetPosvelIngressSeqStats(right_id, right_cb) : false;
+  const bool have_left_main = (left_id > 0u) ? canGetPosvelSeqStats(left_id, left_main) : false;
+  const bool have_right_main = (right_id > 0u) ? canGetPosvelSeqStats(right_id, right_main) : false;
+
+  Serial.printf(
+      "{\"cmd\":\"CAN_INGRESS_SEQ\","
+      "\"left_id\":%u,\"left_cb_valid\":%lu,\"left_cb_missed\":%lu,\"left_cb_dup\":%lu,\"left_cb_ooo\":%lu,"
+      "\"left_main_valid\":%lu,\"left_main_missed\":%lu,\"left_main_dup\":%lu,\"left_main_ooo\":%lu,"
+      "\"right_id\":%u,\"right_cb_valid\":%lu,\"right_cb_missed\":%lu,\"right_cb_dup\":%lu,\"right_cb_ooo\":%lu,"
+      "\"right_main_valid\":%lu,\"right_main_missed\":%lu,\"right_main_dup\":%lu,\"right_main_ooo\":%lu}\r\n",
+      left_id,
+      (unsigned long)(have_left_cb ? left_cb.valid_count : 0u),
+      (unsigned long)(have_left_cb ? left_cb.missed_total : 0u),
+      (unsigned long)(have_left_cb ? left_cb.duplicate_total : 0u),
+      (unsigned long)(have_left_cb ? left_cb.out_of_order_total : 0u),
+      (unsigned long)(have_left_main ? left_main.valid_count : 0u),
+      (unsigned long)(have_left_main ? left_main.missed_total : 0u),
+      (unsigned long)(have_left_main ? left_main.duplicate_total : 0u),
+      (unsigned long)(have_left_main ? left_main.out_of_order_total : 0u),
+      right_id,
+      (unsigned long)(have_right_cb ? right_cb.valid_count : 0u),
+      (unsigned long)(have_right_cb ? right_cb.missed_total : 0u),
+      (unsigned long)(have_right_cb ? right_cb.duplicate_total : 0u),
+      (unsigned long)(have_right_cb ? right_cb.out_of_order_total : 0u),
+      (unsigned long)(have_right_main ? right_main.valid_count : 0u),
+      (unsigned long)(have_right_main ? right_main.missed_total : 0u),
+      (unsigned long)(have_right_main ? right_main.duplicate_total : 0u),
+      (unsigned long)(have_right_main ? right_main.out_of_order_total : 0u));
+}
+
+static void print_min_rx_summary(const Supervisor_typedef *sup, uint32_t now_us) {
+  if (sup == nullptr) return;
+
+  const uint8_t left_id = (sup->esc_count > 0u) ? sup->esc[0].config.node_id : 0u;
+  const uint8_t right_id = (sup->esc_count > 1u) ? sup->esc[1].config.node_id : 0u;
+
+  PosvelRxStats left{};
+  PosvelRxStats right{};
+  PosvelSeqStats left_seq{};
+  PosvelSeqStats right_seq{};
+  const bool have_left = (left_id > 0u) ? canGetPosvelRxStats(left_id, left) : false;
+  const bool have_right = (right_id > 0u) ? canGetPosvelRxStats(right_id, right) : false;
+  const bool have_left_seq = (left_id > 0u) ? canGetPosvelSeqStats(left_id, left_seq) : false;
+  const bool have_right_seq = (right_id > 0u) ? canGetPosvelSeqStats(right_id, right_seq) : false;
+  const CanRuntimeStats rt = canGetRuntimeStats();
+
+  const uint32_t left_age_us =
+      (have_left && left.last_rx_us > 0u) ? (uint32_t)(now_us - left.last_rx_us) : UINT32_MAX;
+  const uint32_t right_age_us =
+      (have_right && right.last_rx_us > 0u) ? (uint32_t)(now_us - right.last_rx_us) : UINT32_MAX;
+  const uint32_t left_alive_false_count =
+      (sup->esc_count > 0u) ? sup->esc_alive_false_count[0] : 0u;
+  const uint32_t right_alive_false_count =
+      (sup->esc_count > 1u) ? sup->esc_alive_false_count[1] : 0u;
+
+  Serial.printf(
+      "{\"cmd\":\"CAN_RX_SUM\","
+      "\"left_id\":%u,\"left_count\":%lu,\"left_age_us\":%lu,\"left_est_missed\":%lu,\"left_seq_valid\":%lu,\"left_seq_missed\":%lu,\"left_seq_dup\":%lu,\"left_seq_ooo\":%lu,\"left_seq_burst_miss_max\":%lu,\"left_alive_false_count\":%lu,"
+      "\"right_id\":%u,\"right_count\":%lu,\"right_age_us\":%lu,\"right_est_missed\":%lu,\"right_seq_valid\":%lu,\"right_seq_missed\":%lu,\"right_seq_dup\":%lu,\"right_seq_ooo\":%lu,\"right_seq_burst_miss_max\":%lu,\"right_alive_false_count\":%lu,"
+      "\"can1_rx_reads\":%lu,\"can2_rx_reads\":%lu,\"rx_overflow\":%lu}\r\n",
+      left_id,
+      (unsigned long)(have_left ? left.count : 0u),
+      (unsigned long)left_age_us,
+      (unsigned long)(have_left ? left.est_missed : 0u),
+      (unsigned long)(have_left_seq ? left_seq.valid_count : 0u),
+      (unsigned long)(have_left_seq ? left_seq.missed_total : 0u),
+      (unsigned long)(have_left_seq ? left_seq.duplicate_total : 0u),
+      (unsigned long)(have_left_seq ? left_seq.out_of_order_total : 0u),
+      (unsigned long)(have_left_seq ? left_seq.burst_miss_max : 0u),
+      (unsigned long)left_alive_false_count,
+      right_id,
+      (unsigned long)(have_right ? right.count : 0u),
+      (unsigned long)right_age_us,
+      (unsigned long)(have_right ? right.est_missed : 0u),
+      (unsigned long)(have_right_seq ? right_seq.valid_count : 0u),
+      (unsigned long)(have_right_seq ? right_seq.missed_total : 0u),
+      (unsigned long)(have_right_seq ? right_seq.duplicate_total : 0u),
+      (unsigned long)(have_right_seq ? right_seq.out_of_order_total : 0u),
+      (unsigned long)(have_right_seq ? right_seq.burst_miss_max : 0u),
+      (unsigned long)right_alive_false_count,
+      (unsigned long)rt.can1_rx_reads,
+      (unsigned long)rt.can2_rx_reads,
+      (unsigned long)rt.rx_overflow);
+}
+
+static void print_min_can_events_summary() {
+  CanEventDispatchStats can1{};
+  CanEventDispatchStats can2{};
+  const bool have_can1 = canGetEventsDispatchStats(1u, can1);
+  const bool have_can2 = canGetEventsDispatchStats(2u, can2);
+
+  Serial.printf(
+      "{\"cmd\":\"CAN_EVENTS_SUM\","
+      "\"can1_calls\":%lu,\"can1_dt_min_us\":%lu,\"can1_dt_avg_us\":%lu,\"can1_dt_max_us\":%lu,\"can1_over_1000_us\":%lu,\"can1_over_2000_us\":%lu,"
+      "\"can2_calls\":%lu,\"can2_dt_min_us\":%lu,\"can2_dt_avg_us\":%lu,\"can2_dt_max_us\":%lu,\"can2_over_1000_us\":%lu,\"can2_over_2000_us\":%lu}\r\n",
+      (unsigned long)(have_can1 ? can1.call_count : 0u),
+      (unsigned long)(have_can1 ? can1.min_dt_us : 0u),
+      (unsigned long)(have_can1 ? can1.avg_dt_us : 0u),
+      (unsigned long)(have_can1 ? can1.max_dt_us : 0u),
+      (unsigned long)(have_can1 ? can1.over_1000_us : 0u),
+      (unsigned long)(have_can1 ? can1.over_2000_us : 0u),
+      (unsigned long)(have_can2 ? can2.call_count : 0u),
+      (unsigned long)(have_can2 ? can2.min_dt_us : 0u),
+      (unsigned long)(have_can2 ? can2.avg_dt_us : 0u),
+      (unsigned long)(have_can2 ? can2.max_dt_us : 0u),
+      (unsigned long)(have_can2 ? can2.over_1000_us : 0u),
+      (unsigned long)(have_can2 ? can2.over_2000_us : 0u));
+}
+
+static void print_balance_can_summary(const Supervisor_typedef *sup,
+                                      uint32_t now_us,
+                                      uint32_t tx_period_us,
+                                      bool tx_enabled) {
+  print_min_ingress_seq_summary(sup);
+  print_min_rx_summary(sup, now_us);
+  print_min_can_events_summary();
+  Serial.printf(
+      "{\"cmd\":\"CAN_TXQ_SUM\",\"attempts\":%lu,\"ok\":%lu,\"fail\":%lu,\"tx_enable\":%d,\"tx_period_us\":%lu}\r\n",
+      (unsigned long)g_tx_attempts,
+      (unsigned long)g_tx_ok,
+      (unsigned long)g_tx_fail,
+      tx_enabled ? 1 : 0,
+      (unsigned long)tx_period_us);
+}
+
 static inline void diag_reset() {
   g_diag_head = 0u;
   g_diag_size = 0u;
@@ -200,89 +351,34 @@ static void diag_dump(const char *reason) {
 
   const char *r = (reason != nullptr) ? reason : "run_end";
   const uint32_t dropped = (g_diag_total > g_diag_size) ? (g_diag_total - g_diag_size) : 0u;
-  Serial.printf(
-      "{\"cmd\":\"BALANCE_TRACE_BEGIN\",\"trace_id\":%lu,\"reason\":\"%s\",\"samples\":%u,\"capacity\":%u,\"total_seen\":%lu,\"dropped\":%lu}\r\n",
-      (unsigned long)g_trace_id,
-      r,
-      (unsigned int)g_diag_size,
-      (unsigned int)BALANCE_LOG_CAPACITY,
-      (unsigned long)g_diag_total,
-      (unsigned long)dropped);
+  (void)r;
+  (void)dropped;
+  // Temporarily disabled to focus serial output on CAN health summaries.
+  // Serial.printf(
+  //     "{\"cmd\":\"BALANCE_TRACE_BEGIN\",\"trace_id\":%lu,\"reason\":\"%s\",\"samples\":%u,\"capacity\":%u,\"total_seen\":%lu,\"dropped\":%lu}\r\n",
+  //     (unsigned long)g_trace_id,
+  //     r,
+  //     (unsigned int)g_diag_size,
+  //     (unsigned int)BALANCE_LOG_CAPACITY,
+  //     (unsigned long)g_diag_total,
+  //     (unsigned long)dropped);
 
-  if (g_diag_size > 0u) {
-    const uint16_t start = (uint16_t)((g_diag_head + BALANCE_LOG_CAPACITY - g_diag_size) % BALANCE_LOG_CAPACITY);
-    for (uint16_t i = 0u; i < g_diag_size; ++i) {
-      const BalanceDiagEntry &e = g_diag_ring[(uint16_t)((start + i) % BALANCE_LOG_CAPACITY)];
-      Serial.printf(
-          "{\"cmd\":\"BALANCE_TRACE\",\"trace_id\":%lu,\"i\":%u,\"t\":%lu,\"elapsed_us\":%lu,\"pitch_raw_rad\":%.6f,\"pitch_rate_raw\":%.6f,\"theta_eq_rad\":%.6f,\"theta_tared_rad\":%.6f,\"theta_dot\":%.6f,\"theta_dot_bias\":%.6f,\"imu_acc_mag_g\":%.6f,\"imu_accel_valid\":%u,\"imu_int_fb_y\":%.6f,\"x_m\":%.6f,\"x_dot\":%.6f,\"x_err_m\":%.6f,\"u_theta\":%.6f,\"u_x\":%.6f,\"u_i\":%.6f,\"u_unsat\":%.6f,\"u\":%.6f,\"pos_l_raw\":%.6f,\"pos_r_raw\":%.6f,\"vel_l_raw\":%.6f,\"vel_r_raw\":%.6f,\"rc_throttle_cmd\":%.6f,\"rc_steer_cmd\":%.6f,\"theta_ref_rad\":%.6f,\"tau_l_cmd\":%.6f,\"tau_r_cmd\":%.6f,\"tare_eq_count\":%u,\"tare_stable_count\":%u,\"dt_us\":%lu,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
-          (unsigned long)g_trace_id,
-          (unsigned int)i,
-          (unsigned long)e.t_us,
-          (unsigned long)e.elapsed_us,
-          e.pitch_raw_rad,
-          e.pitch_rate_raw,
-          e.theta_eq_rad,
-          e.theta_tared_rad,
-          e.theta_dot,
-          e.theta_dot_bias,
-          e.imu_acc_mag_g,
-          (unsigned int)e.imu_accel_valid,
-          e.imu_int_fb_y,
-          e.x_m,
-          e.x_dot,
-          e.x_err_m,
-          e.u_theta,
-          e.u_x,
-          e.u_i,
-          e.u_unsat,
-          e.u_cmd,
-          e.pos_l_raw,
-          e.pos_r_raw,
-          e.vel_l_raw,
-          e.vel_r_raw,
-          e.rc_throttle_cmd,
-          e.rc_steer_cmd,
-          e.theta_ref_rad,
-          e.tau_l_cmd,
-          e.tau_r_cmd,
-          (unsigned int)e.tare_eq_count,
-          (unsigned int)e.tare_stable_count,
-          (unsigned long)e.dt_us,
-          (unsigned long)e.tx_period_us,
-          (e.tx_period_us > 0u) ? (1000000.0f / (float)e.tx_period_us) : 0.0f);
-    }
-  }
-  Serial.printf("{\"cmd\":\"BALANCE_TRACE_END\",\"trace_id\":%lu,\"reason\":\"%s\",\"samples\":%u}\r\n",
-                (unsigned long)g_trace_id,
-                r,
-                (unsigned int)g_diag_size);
+  // Per-sample BALANCE_TRACE rows are intentionally disabled for now.
+  // Temporarily disabled to focus serial output on CAN health summaries.
+  // Serial.printf("{\"cmd\":\"BALANCE_TRACE_END\",\"trace_id\":%lu,\"reason\":\"%s\",\"samples\":%u}\r\n",
+  //               (unsigned long)g_trace_id,
+  //               r,
+  //               (unsigned int)g_diag_size);
   g_diag_dumped = true;
-}
-
-static inline void send_iqreq(float torque_nm,
-                              uint8_t node_id,
-                              FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can1,
-                              FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2) {
-  CAN_message_t msg;
-  msg.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, node_id);
-  msg.len = 8;
-  msg.flags.extended = 1;
-  canPackFloat(torque_nm, msg.buf);
-  canPackFloat(0.0f, msg.buf + 4);
-
-  const uint8_t tx_bus = can_tx_bus_for_node(node_id);
-  if (tx_bus == CAN_TX_BUS_CAN1 || tx_bus == CAN_TX_BUS_BOTH) {
-    can1.write(msg);
-  }
-  if (tx_bus == CAN_TX_BUS_CAN2 || tx_bus == CAN_TX_BUS_BOTH) {
-    can2.write(msg);
-  }
 }
 
 static inline void reset_balance_state() {
   g_first_entry = true;
   g_start_us = 0u;
   g_last_tx_us = 0u;
+  g_tx_attempts = 0u;
+  g_tx_ok = 0u;
+  g_tx_fail = 0u;
   g_last_tare_wait_print_us = 0u;
 
   g_theta_eq = 0.0f;
@@ -302,6 +398,7 @@ static inline void reset_balance_state() {
   g_unwrap_r = 0.0f;
   g_vel_filt_l = 0.0f;
   g_vel_filt_r = 0.0f;
+  g_yaw_ref = 0.0f;
 
   g_u_cmd_hold = 0.0f;
   g_x_ref_m = 0.0f;
@@ -317,13 +414,41 @@ static inline void reset_balance_state() {
   diag_reset();
 }
 
+static bool send_iqreq_checked(float torque_nm,
+                               uint8_t node_id,
+                               FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can1,
+                               FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2) {
+  CAN_message_t msg;
+  msg.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, node_id);
+  msg.len = 8;
+  msg.flags.extended = 1;
+  canPackFloat(torque_nm, msg.buf);
+  canPackFloat(0.0f, msg.buf + 4);
+
+  const uint8_t tx_bus = can_tx_bus_for_node(node_id);
+  const bool ok1 = (tx_bus == CAN_TX_BUS_CAN1 || tx_bus == CAN_TX_BUS_BOTH)
+                     ? can1.write(msg)
+                     : false;
+  const bool ok2 = (tx_bus == CAN_TX_BUS_CAN2 || tx_bus == CAN_TX_BUS_BOTH)
+                     ? can2.write(msg)
+                     : false;
+  return ok1 || ok2;
+}
+
 static inline void send_zero_and_idle(Supervisor_typedef *sup,
                                       FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can1,
-                                      FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2) {
+                                      FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2,
+                                      uint32_t now_us,
+                                      uint32_t tx_period_us,
+                                      bool tx_enabled) {
   const uint16_t esc_n = (sup->esc_count >= 2u) ? 2u : sup->esc_count;
   for (uint16_t i = 0u; i < esc_n; ++i) {
-    send_iqreq(0.0f, sup->esc[i].config.node_id, can1, can2);
+    const bool ok = send_iqreq_checked(0.0f, sup->esc[i].config.node_id, can1, can2);
+    g_tx_attempts++;
+    g_tx_ok += ok ? 1u : 0u;
+    g_tx_fail += ok ? 0u : 1u;
   }
+  print_balance_can_summary(sup, now_us, tx_period_us, tx_enabled);
   sup->mode = SUP_MODE_IDLE;
   reset_balance_state();
 }
@@ -385,7 +510,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
                       FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2) {
   if (sup == nullptr) return;
   if (sup->esc_count < 2u) {
-    send_zero_and_idle(sup, can1, can2);
+    send_zero_and_idle(sup, can1, can2, micros(), BALANCE_TX_PERIOD_US, sup->user_tx_enable);
     return;
   }
 
@@ -408,12 +533,16 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     g_theta_eq_count = 0u;
     g_tare_stable_count = 0u;
     g_unwrap_init = false;
+    g_yaw_ref = 0.0f;
     g_u_cmd_hold = 0.0f;
     g_x_ref_m = 0.0f;
     g_x_int_m_s = 0.0f;
     g_x_ref_init = false;
     g_x_recenter_stable_since_us = 0u;
     diag_reset();
+    g_tx_attempts = 0u;
+    g_tx_ok = 0u;
+    g_tx_fail = 0u;
 
     Serial.printf("{\"cmd\":\"BALANCE_START\",\"send_torque\":%d,\"fixed_torque_test\":%d,\"fixed_torque_nm\":%.3f}\r\n",
                   (int)SEND_TORQUE,
@@ -431,11 +560,15 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     Serial.printf("{\"cmd\":\"BALANCE_ABORT\",\"reason\":\"freshness\",\"imu_fresh\":%d,\"esc_l_fresh\":%d,\"esc_r_fresh\":%d}\r\n",
                   imu_fresh ? 1 : 0, esc_l_fresh ? 1 : 0, esc_r_fresh ? 1 : 0);
     diag_dump("freshness");
-    send_zero_and_idle(sup, can1, can2);
+    const uint32_t tx_period_us_fallback =
+        (sup->user_tx_period_us > 0u) ? sup->user_tx_period_us : BALANCE_TX_PERIOD_US;
+    send_zero_and_idle(sup, can1, can2, now_us, tx_period_us_fallback, sup->user_tx_enable);
     return;
   }
 
-  const uint32_t tx_period_us = BALANCE_TX_PERIOD_US;
+  const uint32_t tx_period_us =
+      (sup->user_tx_period_us > 0u) ? sup->user_tx_period_us : BALANCE_TX_PERIOD_US;
+  const bool tx_enabled = sup->user_tx_enable && (SEND_TORQUE != 0);
   const bool tx_due = (g_last_tx_us == 0u) ||
                       ((uint32_t)(now_us - g_last_tx_us) >= tx_period_us);
 
@@ -479,6 +612,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
           g_theta_sign_state = 0;
           g_last_zero_cross_us = now_us;
           g_zero_cross_arm_us = now_us + ZERO_CROSS_ARM_DELAY_US;
+          g_yaw_ref = g_unwrap_l - g_unwrap_r;
           Serial.printf("{\"cmd\":\"BALANCE_TARE_DONE\",\"theta_eq_rad\":%.6f,\"theta_dot_bias_rad_s\":%.6f}\r\n",
                         g_theta_eq, g_theta_dot_bias);
         }
@@ -505,8 +639,11 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
     if (tx_due) {
       g_last_tx_us = now_us;
-      send_iqreq(0.0f, sup->esc[0].config.node_id, can1, can2);
-      send_iqreq(0.0f, sup->esc[1].config.node_id, can1, can2);
+      const bool ok_l = send_iqreq_checked(0.0f, sup->esc[0].config.node_id, can1, can2);
+      const bool ok_r = send_iqreq_checked(0.0f, sup->esc[1].config.node_id, can1, can2);
+      g_tx_attempts += 2u;
+      g_tx_ok += (ok_l ? 1u : 0u) + (ok_r ? 1u : 0u);
+      g_tx_fail += (ok_l ? 0u : 1u) + (ok_r ? 0u : 1u);
       g_u_cmd_hold = 0.0f;
     }
     return;
@@ -568,6 +705,9 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   float x_wheel_m = 0.0f;
   float x_dot_m_s = 0.0f;
   update_wheel_unwrap(pos_l, pos_r, vel_l, vel_r, dt_s, &x_wheel_m, &x_dot_m_s);
+  float yaw_error = (g_unwrap_l - g_unwrap_r) - g_yaw_ref; // Relative to tare heading
+  float yaw_rate_error = g_vel_filt_l - g_vel_filt_r; // Difference in wheel speed
+  float u_sync = (K_YAW_P * yaw_error) + (K_YAW_D * yaw_rate_error);
   if (!g_x_ref_init) {
     // Lock position reference at balance start so "hold position" means
     // return to this wheel-center location after disturbances.
@@ -606,7 +746,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
         "{\"cmd\":\"BALANCE_ABORT\",\"reason\":\"pos_units\",\"pos_l_raw\":%.6f,\"pos_r_raw\":%.6f,\"d_l_rad\":%.6f,\"d_r_rad\":%.6f,\"range_ok\":%d,\"step_ok\":%d}\r\n",
         pos_l, pos_r, g_last_d_l_rad, g_last_d_r_rad, g_pos_range_ok ? 1 : 0, g_pos_step_ok ? 1 : 0);
     diag_dump("pos_units");
-    send_zero_and_idle(sup, can1, can2);
+    send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
     return;
   }
 
@@ -615,7 +755,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     Serial.printf("{\"cmd\":\"BALANCE_ABORT\",\"reason\":\"limits\",\"theta\":%.4f,\"vel_l\":%.3f,\"vel_r\":%.3f}\r\n",
                   theta, vel_l, vel_r);
     diag_dump("limits");
-    send_zero_and_idle(sup, can1, can2);
+    send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
     return;
   }
 
@@ -630,10 +770,14 @@ void balance_TWR_mode(Supervisor_typedef *sup,
       (fabsf(theta_dot) <= X_HOLD_ENABLE_THETA_DOT_RAD_S) &&
       (fabsf(x_dot_m_s) <= X_HOLD_ENABLE_X_DOT_M_S);
 
-  if (POS_HOLD_KI > 0.0f) {
+  const float k_x = BALANCE_TARE_VALIDATION_MODE ? 0.0f : K_DISC[2];
+  const float k_x_dot = BALANCE_TARE_VALIDATION_MODE ? 0.0f : K_DISC[3];
+  const float pos_hold_ki = BALANCE_TARE_VALIDATION_MODE ? 0.0f : POS_HOLD_KI;
+
+  if (pos_hold_ki > 0.0f) {
     if (x_hold_enabled) {
       g_x_int_m_s += x_pos_err_m * dt_s;
-      const float x_int_lim = POS_HOLD_I_CLAMP_NM / POS_HOLD_KI;
+      const float x_int_lim = POS_HOLD_I_CLAMP_NM / pos_hold_ki;
       g_x_int_m_s = clampf(g_x_int_m_s, -x_int_lim, x_int_lim);
     } else {
       g_x_int_m_s *= X_HOLD_INT_LEAK_PER_STEP;
@@ -643,13 +787,13 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   }
 
   const float u_x_i = x_hold_enabled
-                          ? clampf(POS_HOLD_KI * g_x_int_m_s,
+                          ? clampf(pos_hold_ki * g_x_int_m_s,
                                    -POS_HOLD_I_CLAMP_NM, POS_HOLD_I_CLAMP_NM)
                           : 0.0f;
   const float u_theta = -(K_DISC[0] * theta_err) * SAFETY_SCALE;
   const float u_theta_dot = -(K_DISC[1] * theta_dot) * SAFETY_SCALE;
-  const float u_x = x_hold_enabled ? (-(K_DISC[2] * x_pos_err_m) * SAFETY_SCALE) : 0.0f;
-  const float u_x_dot = x_hold_enabled ? (-(K_DISC[3] * x_dot_err_m_s) * SAFETY_SCALE) : 0.0f;
+  const float u_x = x_hold_enabled ? (-(k_x * x_pos_err_m) * SAFETY_SCALE) : 0.0f;
+  const float u_x_dot = x_hold_enabled ? (-(k_x_dot * x_dot_err_m_s) * SAFETY_SCALE) : 0.0f;
   const float u_i = -(u_x_i) * SAFETY_SCALE;
   const float u_balance = u_theta + u_theta_dot + u_x + u_x_dot + u_i;
   const float u_model = BALANCE_FIXED_TORQUE_TEST
@@ -659,19 +803,25 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   if (tx_due) {
     float u_cmd = clampf(u_model, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
-    float tau_l_cmd = clampf(-u_cmd + u_steer, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
-    float tau_r_cmd = clampf( u_cmd + u_steer, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+    float tau_l_cmd = clampf(-u_cmd + u_steer - u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+    float tau_r_cmd = clampf( u_cmd + u_steer + u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
     g_u_cmd_hold = u_cmd;
     g_last_tx_us = now_us;
-#if SEND_TORQUE
-    send_iqreq(tau_l_cmd, sup->esc[0].config.node_id, can1, can2);
-    send_iqreq(tau_r_cmd, sup->esc[1].config.node_id, can1, can2);
-#else
-    tau_l_cmd = 0.0f;
-    tau_r_cmd = 0.0f;
-    send_iqreq(0.0f, sup->esc[0].config.node_id, can1, can2);
-    send_iqreq(0.0f, sup->esc[1].config.node_id, can1, can2);
-#endif
+    if (tx_enabled) {
+      const bool ok_l = send_iqreq_checked(tau_l_cmd, sup->esc[0].config.node_id, can1, can2);
+      const bool ok_r = send_iqreq_checked(tau_r_cmd, sup->esc[1].config.node_id, can1, can2);
+      g_tx_attempts += 2u;
+      g_tx_ok += (ok_l ? 1u : 0u) + (ok_r ? 1u : 0u);
+      g_tx_fail += (ok_l ? 0u : 1u) + (ok_r ? 0u : 1u);
+    } else {
+      tau_l_cmd = 0.0f;
+      tau_r_cmd = 0.0f;
+      const bool ok_l = send_iqreq_checked(0.0f, sup->esc[0].config.node_id, can1, can2);
+      const bool ok_r = send_iqreq_checked(0.0f, sup->esc[1].config.node_id, can1, can2);
+      g_tx_attempts += 2u;
+      g_tx_ok += (ok_l ? 1u : 0u) + (ok_r ? 1u : 0u);
+      g_tx_fail += (ok_l ? 0u : 1u) + (ok_r ? 0u : 1u);
+    }
 
     BalanceDiagEntry e{};
     e.t_us = now_us;
@@ -716,7 +866,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
                     (unsigned long)elapsed_us,
                     (unsigned long)sup->user_total_us);
       diag_dump("time_limit");
-      send_zero_and_idle(sup, can1, can2);
+      send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
       return;
     }
   }
