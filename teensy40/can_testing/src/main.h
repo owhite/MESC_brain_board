@@ -25,6 +25,8 @@
 // For CAN2 on Teensy 4.0, DEF selects CAN2_RX=pin 0 and CAN2_TX=pin 1.
 #define CAN2_PINSEL     DEF
 
+// CAN reliability improvement:
+// A/B switch for receive servicing path under dual-bus load.
 // CAN RX strategy A/B switch:
 // 0 = polling in loop() (legacy behavior)
 // 1 = ISR callback + events() dispatch

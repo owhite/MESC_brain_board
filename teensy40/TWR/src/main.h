@@ -25,6 +25,9 @@
 // For CAN2 on Teensy 4.0, DEF selects CAN2_RX=pin 0 and CAN2_TX=pin 1.
 #define CAN2_PINSEL     DEF
 
+// CAN RX path is fixed to ISR callback + events() dispatch.
+#define CAN_RX_USE_ISR 1
+
 // Global compile-time safety gate for wheel command transmission.
 // 0 = never send IQREQ torque frames from Teensy
 // 1 = allow IQREQ torque TX (normal behavior)
@@ -53,8 +56,6 @@ static inline uint8_t can_tx_bus_for_node(uint8_t node_id) {
 
 // Short chirp used by balance mode when theta_tared crosses zero.
 void balance_zero_cross_tweet(void);
-
-
 
 // ================= RC PWM channels =================
 #define RC_INPUT1       4

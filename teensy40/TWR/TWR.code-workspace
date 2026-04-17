@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"platformio-ide.useBuiltinPIOCore": false,
+		"platformio-ide.customPATH": "/Users/owhite/.platformio/penv/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	}
+}

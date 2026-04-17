@@ -1,81 +1,46 @@
 # TWR Testing
 
-The starting code here reflects the work done in can_testing. There were a lot of issues to improving CAN communications. This also reflects use of the brain_board V1.6 which has two separate CAN transceivers. 
+This folder currently contains two firmware trees:
 
-Deets:
-- Github repo: `https://github.com/davidmolony/MESC_Firmware.git`
-- Branch: `RTOS_REMOVAL`
-- Folder: `can_testing`
-- Commit: `37bc92fb2ed2a5541fa8c1162a954772b4dffe05`
-- Short hash: `37bc92f`
+- Active TWR firmware: `TWR/src`
+- CAN-focused reference copy: `TWR/can_testing/src`
 
-## CAN Testing Status (Current)
+Important: recent CAN reliability work was developed and validated in the CAN-focused tree. Do not assume `TWR/src` and `TWR/can_testing/src` are identical.
 
-- Two physical CAN buses on brain_board V1.6 are working and receiving telemetry from both ESCs.
-- 30s/60s validation runs complete reliably with `TX fail = 0` and `rx_overflow = 0`.
-- End-to-end reliability improved substantially versus early shared-bus tests.
-- Stable operation was demonstrated at:
-  - `tx hz 250` (strong margin)
-  - `tx hz 500` (usable in latest setup, but with tighter margin)
-- ESC telemetry scheduling with aligned phase (`can_posvel_phase_us = 0` on both ESCs) produced better symmetry and consistency in recent tests.
-- Remaining behavior to keep in mind:
-  - IQREQ timing from Teensy is not perfectly uniform (mixed ~2-3 ms spacing under current loop/service pattern).
-  - Telemetry quality is still evaluated by tail metrics (p95/p99/max gap), not average gap alone.
-- Current conclusion: CAN telemetry/command path is in a good state for balance bring-up testing.
+## CAN Status (Latest)
 
-## IMU Filtering Algorithms (Current)
+Recent CAN-focused runs (dual ESC, dual bus) have been strong:
 
-- Sensor and timing path:
-  - ICM42688 is read over SPI using DRDY interrupt signaling.
-  - Each DRDY event triggers `getAGT()` in the main loop.
-  - If `getAGT()` fails, IMU state is marked invalid for that cycle (`imu_valid = 0`).
-- Orientation estimator:
-  - 6-DOF Mahony quaternion update (gyro integration + accel gravity correction).
-  - Proportional/integral feedback gains are `Kp = 0.5`, `Ki = 0.1` (implemented as `twoKp = 1.0`, `twoKi = 0.2`).
-- Accel gating:
-  - Accelerometer vector is normalized.
-  - Gravity correction is applied only when accel magnitude is near 1 g (`0.85 g` to `1.15 g`).
-  - Outside this range, accel correction is ignored for that step (gyro-only propagation, integral reset).
-- `dt` handling for filter stability:
-  - `dt` is measured from IMU update timestamps.
-  - If out of expected bounds (`<0.5 ms` or `>5 ms`), it falls back to the nominal control period (`1 ms`).
-- Output states used by control/diagnostics:
-  - Pitch angle is extracted from quaternion: `pitch_rad = asin(2*(q0*q2 - q3*q1))`.
-  - Raw pitch rate uses gyro Y axis in rad/s (`pitch_rate_raw`).
-  - Filtered pitch rate uses a first-order IIR low-pass:
-    - `pitch_rate = alpha * pitch_rate_raw + (1 - alpha) * pitch_rate_prev`
-    - Current `alpha = 0.15`.
-- RMS diagnostics in `verify_angle` mode:
-  - `rms_raw_rad_s` and `rms_filt_rad_s` are rolling RMS values over a fixed 200-sample window (not cumulative).
-  - This provides fast settling and better live vibration/noise assessment during motor on/off tests.
+- 60 s runs at 500 Hz IQREQ (`tx_period_us=2000`) completed with:
+  - zero TX failures,
+  - zero RX overflow,
+  - healthy CAN event dispatch timing,
+  - near-zero to zero sequence misses (occasional single-frame blips).
 
-## IMU Testing
+This is good enough to proceed with robot integration testing.
 
-### Serial fields sent by Teensy (`VERIFY_ANGLE`)
+## IMU Filter (Current `TWR/src`)
 
-- `cmd`: message type (`"VERIFY_ANGLE"`).
-- `t`: Teensy timestamp in microseconds.
-- `pitch_rad`, `pitch_deg`: current estimated pitch angle.
-- `pitch_rate_raw_rad_s`, `pitch_rate_raw_deg_s`: raw gyro-derived pitch rate.
-- `pitch_rate_rad_s`, `pitch_rate_deg_s`: filtered pitch rate (IIR filtered).
-- `rms_raw_rad_s`: rolling RMS of raw pitch rate (200-sample window).
-- `rms_filt_rad_s`: rolling RMS of filtered pitch rate (200-sample window).
-- `rms_n`: number of samples currently in RMS window (ramps to 200, then stays at 200).
-- `motor`: `0/1` indicating whether motor command mode is active in verify mode.
-- `tau_left_nm`, `tau_right_nm`: verify-mode motor torques when `motor=1`.
-- `imu_valid`: `1` if IMU update is valid for current cycle.
-- `imu_age_us`: age of last IMU update in microseconds.
-- `loop_dt_us`: control loop dt in microseconds.
+- Filter type: 6-DOF Mahony quaternion update.
+- Gains:
+  - `Kp = 0.5` (`twoKp = 1.0`)
+  - `Ki = 0.1` (`twoKi = 0.2`)
+- Accel correction gating:
+  - full correction for low accel-magnitude error,
+  - tapered correction until `|acc|-1` reaches `0.06 g`,
+  - no accel correction beyond that.
+  - Practical band is tighter than `0.85..1.15 g` (roughly around `0.94..1.06 g` with taper).
+- `dt` guard:
+  - measured from IMU timestamps,
+  - clamped to nominal 1 ms when outside `0.5..5 ms`.
+- Reported states:
+  - `pitch_rad = asin(2*(q0*q2 - q3*q1))`
+  - `pitch_rate_raw` from gyro Y,
+  - low-pass filtered `pitch_rate` (`alpha = 0.15`).
 
-### What each graph shows in `IMU_test.py`
+## IMU Test Tool
 
-- Top graph (`IMU Pitch Angle`): `pitch_deg` vs time.
-- Middle graph (`IMU Pitch Rate`): `pitch_rate_deg_s` (filtered pitch rate) vs time.
-- Bottom graph (`Pitch Rate RMS (Raw vs Filtered)`):
-  - Blue line: raw RMS (`rms_raw_rad_s` converted to deg/s).
-  - Orange line: filtered RMS (`rms_filt_rad_s` converted to deg/s).
-
-### How to run the Python test tool
+Run:
 
 ```bash
 python3 /Users/owhite/balancing-robot-notes/teensy40/TWR/IMU_test.py \
@@ -84,19 +49,25 @@ python3 /Users/owhite/balancing-robot-notes/teensy40/TWR/IMU_test.py \
   --expect-n 200
 ```
 
-- Click `Run` to start `verify_angle` telemetry mode.
-- Use motor mode selector (`MOTOR OFF` / `MOTOR ON`) to choose whether `Run` commands motor toggle or plain verify mode.
+Outputs and plot fields in `VERIFY_ANGLE` mode remain as documented by the script (`pitch`, `pitch_rate`, raw/filtered RMS, IMU age/valid, loop dt, optional verify motor torque).
 
-### IMU Plot Image
+## Open Control Note
 
-![IMU pitch-rate RMS plot](vibe_testing1.png)
-Plot shows motors  running from 15-30s, a bump on the table, and running motors at 40-50s
+The balance controller still needs continued tuning/validation for translational terms (`x`, `x_dot`, integral hold behavior) under real disturbance cases.
 
-## Control Sign Issue (Open)
+## Recent Code Changes (April 2026)
 
-- During balance bring-up, we observed behavior consistent with a possible mis-signed translational contribution in the control law (most likely in `x` and/or `x_dot` terms), while tilt-related terms appeared mostly directionally correct.
-- Symptom pattern:
-  - The robot can momentarily stabilize near tare.
-  - It then develops drift and sometimes applies torque that appears to reinforce translational error instead of damping it.
-- Practical implication:
-  - Before integrating RC references, we should re-validate sign conventions for wheel unwrap, `x`, `x_dot`, and wheel torque mixing (`tau_L`, `tau_R`) under a controlled test sequence.
+- Added a virtual-axle synchronization path in `balance_TWR_mode.cpp`:
+  - computes yaw mismatch from wheel unwrapped distance/speed (`g_unwrap_l - g_unwrap_r`),
+  - stores a tare-time yaw reference (`g_yaw_ref`),
+  - computes relative yaw error and optional sync torque (`u_sync`) that is mixed into left/right torque commands.
+- Added/kept the tare-time yaw reference capture so heading correction is relative to the start posture, not absolute wheel offsets.
+- Added a button-release entry latch in `main.cpp` for balance start:
+  - if entry angle is valid while pressed (green LED on), release still starts balance/tare even if angle shifts slightly at release.
+- Updated IMU anti-drift handling in `main.cpp`:
+  - Mahony integral remains enabled with moderated `Ki`,
+  - integral clamp + ungated decay behavior,
+  - bump holdoff window for accel correction during disturbances,
+  - quiet-motion gating for accel correction while balancing.
+- Balance command cadence defaults are aligned with the stable CAN profile used in testing (`tx_period_us = 2000`, 500 Hz) unless overridden by runtime command.
+

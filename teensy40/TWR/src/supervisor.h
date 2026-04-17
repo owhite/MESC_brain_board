@@ -79,9 +79,11 @@ struct IMUState {
 // High-level supervisor state machine.
 enum SupervisorMode {
   SUP_MODE_IDLE = 0,   // System idle, no active control
+  SUP_MODE_CALIBRATE,  // User-held calibration from kickstand to upright target
   SUP_VERIFY_ANGLE,    // IMU verification: zero torque, report pitch/rate
   SUP_MODE_BALANCE_HOLD, // Balance with position-hold only (no RC motion commands)
   SUP_MODE_BALANCE_TWR,  // Balance with RC motion shaping enabled
+  SUP_MODE_BALANCE_DEBUG, // Debug clone of balance mode for A/B testing
   SUP_MODE_TEST_CAN
 };
 
@@ -116,7 +118,9 @@ struct Supervisor_typedef {
   uint32_t user_pulse_us    = 1000;   // duration of pulse (µs)
   uint32_t user_total_us    = 1000;
   bool user_tx_enable       = true;   // Enables/disables torque command TX during test mode.
-  uint32_t user_tx_period_us = 4000;  // Command TX period in microseconds (4000 us = 250 Hz).
+  // CAN reliability improvement baseline:
+  // 2000 us (500 Hz) default command cadence used for stable dual-channel operation.
+  uint32_t user_tx_period_us = 2000;  // Command TX period in microseconds (2000 us = 500 Hz).
 
   SerialStats serial1_stats;                               // Telemetry serial performance stats
 

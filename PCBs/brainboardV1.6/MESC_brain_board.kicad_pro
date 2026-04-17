@@ -510,7 +510,7 @@
       "plot": "DXFs/",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "../../../Downloads/MESC_brain_board.step",
       "svg": "",
       "vrml": ""
     },

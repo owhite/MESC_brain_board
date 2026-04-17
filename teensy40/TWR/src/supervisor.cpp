@@ -4,6 +4,7 @@
 #include "main.h"
 #include "test_can_transmit_mode.h"
 #include "balance_TWR_mode.h"
+#include "balance_debug_mode.h"
 
 // ---------------- Global Flags ----------------
 // These are set by the control ISR to signal the main loop.
@@ -12,7 +13,9 @@ volatile uint32_t g_control_now_us = 0;
 static constexpr uint32_t ESC_ALIVE_TIMEOUT_US = 200000u;
 
 static inline bool is_balance_mode(SupervisorMode m) {
-  return (m == SUP_MODE_BALANCE_HOLD) || (m == SUP_MODE_BALANCE_TWR);
+  return (m == SUP_MODE_BALANCE_HOLD) ||
+         (m == SUP_MODE_BALANCE_TWR) ||
+         (m == SUP_MODE_BALANCE_DEBUG);
 }
 
 // Note there are multiple ISRs, some for the controlLoop(),
@@ -237,12 +240,13 @@ static inline bool send_torque_for_esc(Supervisor_typedef *sup,
                                        float torque_nm) {
   if (sup == nullptr) return false;
   if (esc_num >= sup->esc_count) return false;
+  const float torque_cmd_nm = (SEND_TORQUE != 0) ? torque_nm : 0.0f;
 
   CAN_message_t msg;
   msg.id = canMakeExtId(CAN_ID_IQREQ, TEENSY_NODE_ID, sup->esc[esc_num].config.node_id);
   msg.len = 8;
   msg.flags.extended = 1;
-  canPackFloat(torque_nm, msg.buf);
+  canPackFloat(torque_cmd_nm, msg.buf);
   canPackFloat(0.0f, msg.buf + 4);
 
   const uint8_t tx_bus = can_tx_bus_for_node(sup->esc[esc_num].config.node_id);
@@ -332,7 +336,11 @@ void controlLoop(Supervisor_typedef *sup,
   static SupervisorMode s_prev_mode = SUP_MODE_IDLE;
   if (sup->mode != s_prev_mode) {
     if (is_balance_mode(s_prev_mode) && !is_balance_mode(sup->mode)) {
-      balance_TWR_dump_on_mode_exit("mode_exit");
+      if (s_prev_mode == SUP_MODE_BALANCE_DEBUG) {
+        balance_debug_dump_on_mode_exit("mode_exit");
+      } else {
+        balance_TWR_dump_on_mode_exit("mode_exit");
+      }
     }
     if (sup->mode == SUP_VERIFY_ANGLE) {
       verify_rate_raw_rms.reset();
@@ -350,6 +358,15 @@ void controlLoop(Supervisor_typedef *sup,
         send_zero_torque_all(sup, can1, can2);
 	    }
 
+    break;
+  }
+
+  case SUP_MODE_CALIBRATE: {
+    // Keep motors de-energized while user performs kickstand calibration.
+    if (++telem_counter >= TELEMETRY_DECIMATE) {
+      telem_counter = 0;
+      send_zero_torque_all(sup, can1, can2);
+    }
     break;
   }
 
@@ -410,6 +427,11 @@ void controlLoop(Supervisor_typedef *sup,
 
   case SUP_MODE_BALANCE_TWR: {
     balance_TWR_mode(sup, can1, can2);
+    break;
+  }
+
+  case SUP_MODE_BALANCE_DEBUG: {
+    balance_debug_mode(sup, can1, can2);
     break;
   }
 

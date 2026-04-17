@@ -116,7 +116,9 @@ struct Supervisor_typedef {
   uint32_t user_pulse_us    = 1000;   // duration of pulse (µs)
   uint32_t user_total_us    = 1000;
   bool user_tx_enable       = true;   // Enables/disables torque command TX during test mode.
-  uint32_t user_tx_period_us = 4000;  // Command TX period in microseconds (4000 us = 250 Hz).
+  // CAN reliability improvement baseline:
+  // 2000 us (500 Hz) default command cadence used for stable dual-channel operation.
+  uint32_t user_tx_period_us = 2000;  // Command TX period in microseconds (2000 us = 500 Hz).
 
   SerialStats serial1_stats;                               // Telemetry serial performance stats
 

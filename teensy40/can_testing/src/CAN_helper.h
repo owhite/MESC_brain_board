@@ -45,6 +45,8 @@ struct PosvelSeqStats {
   uint32_t burst_miss_max = 0;
 };
 
+// CAN reliability improvement:
+// Mirror ESC-side diagnostic counters on Teensy so drop/overrun origin is observable.
 struct CanRuntimeStats {
   uint32_t can1_rx_reads = 0;
   uint32_t can2_rx_reads = 0;

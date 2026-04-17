@@ -27,6 +27,16 @@ void tone_init(TonePlayer* tp, uint8_t pin);
 // Start a tone: freq_hz for dur_ms, then silence_ms of silence.
 // freq_hz == 0 starts only the silence period (no tone).
 void tone_start(TonePlayer* tp, uint32_t freq_hz, uint32_t dur_ms, uint32_t silence_ms);
+// Same as tone_start, but allows output volume scaling.
+// volume_pct: 100 = normal, 50 = half volume (approx), clamped to [1,100].
+void tone_start_volume(TonePlayer* tp, uint32_t freq_hz, uint32_t dur_ms, uint32_t silence_ms, uint8_t volume_pct);
+
+// High-level tone sequences used by balance workflow.
+void start_calibrate_song(TonePlayer* tp);
+void start_idle_long_hold_song(TonePlayer* tp);
+void update_idle_long_hold_song(TonePlayer* tp);
+void update_calibrate_song(TonePlayer* tp);
+void balance_zero_cross_tweet(TonePlayer* tp);
 
 // Stop immediately (no post-silence)
 void tone_stop(TonePlayer* tp);

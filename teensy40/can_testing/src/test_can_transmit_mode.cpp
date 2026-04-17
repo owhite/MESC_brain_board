@@ -11,6 +11,8 @@ static uint32_t g_tx_attempts = 0u;
 static uint32_t g_tx_ok = 0u;
 static uint32_t g_tx_fail = 0u;
 
+// CAN reliability improvement:
+// Report callback-ingress vs main-loop sequence continuity to localize loss.
 static void print_min_ingress_seq_summary(const Supervisor_typedef *sup) {
   if (sup == nullptr) return;
 
@@ -292,6 +294,8 @@ void test_can_transmit_mode(Supervisor_typedef *sup,
       g_tx_fail += okStopR ? 0u : 1u;
     }
 
+    // CAN reliability improvement:
+    // Emit compact end-of-run diagnostics needed for A/B and soak comparisons.
     print_min_f405_ovr_summary(sup, now_us);
     print_min_f405_iqreq_summary(sup, now_us);
     print_min_ingress_seq_summary(sup);

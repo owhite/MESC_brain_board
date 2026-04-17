@@ -7,6 +7,8 @@
 static volatile uint32_t g_last_posvel_rx_us = 0;
 static PosvelRxStats g_posvel_stats[ESC_LOOKUP_SIZE];
 static PosvelSeqStats g_posvel_seq_stats[ESC_LOOKUP_SIZE];
+// CAN reliability improvement:
+// Track sequence continuity at callback ingress separately from main-loop processing.
 static PosvelSeqStats g_posvel_ingress_seq_stats[ESC_LOOKUP_SIZE];
 static F405OverrunStats g_f405_overrun_stats[ESC_LOOKUP_SIZE];
 static F405IqreqStats g_f405_iqreq_stats[ESC_LOOKUP_SIZE];
@@ -404,6 +406,8 @@ void canNotePosvelIngress(const CAN_message_t &msg) {
     uint32_t seq = 0u;
     float pos = 0.0f;
 
+    // CAN reliability improvement:
+    // Capture sequence at ingress to isolate hardware->callback loss from callback->main loss.
     if (msg_type != CAN_ID_POSVEL) return;
     if (sender_id >= ESC_LOOKUP_SIZE || !esc_lookup[sender_id]) return;
     memcpy(&pos, &msg.buf[0], sizeof(float));
@@ -473,6 +477,8 @@ void handleCANMessage(const CAN_message_t &msg, uint8_t rx_bus) {
         case CAN_ID_STATUS: {
             uint32_t valid = 0u;
             uint32_t missed = 0u;
+            // CAN reliability improvement:
+            // Consume ESC-side IQREQ sequence diagnostics for uplink integrity checks.
             unpack_u32x2_be(msg.buf, &valid, &missed);
             g_f405_iqreq_stats[sender_id].iqreq_seq_valid_count = valid;
             g_f405_iqreq_stats[sender_id].iqreq_seq_missed_total = missed;
@@ -483,6 +489,8 @@ void handleCANMessage(const CAN_message_t &msg, uint8_t rx_bus) {
         case CAN_ID_FOC_HYPER: {
             uint32_t fov0 = 0u;
             uint32_t fov1 = 0u;
+            // CAN reliability improvement:
+            // Pull FIFO overrun counters exported by ESC to detect RX-service bottlenecks.
             unpack_u32x2_be(msg.buf, &fov0, &fov1);
             g_f405_overrun_stats[sender_id].fifo0_overrun_count = fov0;
             g_f405_overrun_stats[sender_id].fifo1_overrun_count = fov1;
