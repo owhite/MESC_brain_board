@@ -28,6 +28,34 @@
 // CAN RX path is fixed to ISR callback + events() dispatch.
 #define CAN_RX_USE_ISR 1
 
+// ================= Serial Console A/B =================
+// 1 = parse interactive serial commands in low-priority loop.
+// 0 = disable command parsing entirely (A/B timing test).
+#ifndef SERIAL_CONSOLE_ENABLE
+#define SERIAL_CONSOLE_ENABLE 1
+#endif
+
+// 1 = echo typed characters back to terminal during console parsing.
+// 0 = no echo (keeps parser active but lighter).
+#ifndef SERIAL_CONSOLE_ECHO
+#define SERIAL_CONSOLE_ECHO 1
+#endif
+
+// Max number of serial bytes parsed per low-priority pass.
+// 0 = unlimited; lower values reduce console-induced jitter for A/B tests.
+#ifndef SERIAL_CONSOLE_CHAR_BUDGET_PER_CALL
+#define SERIAL_CONSOLE_CHAR_BUDGET_PER_CALL 0u
+#endif
+
+// ================= ESP32 Telemetry Link =================
+// Teensy 4.0 pins 16/17 map to Serial4 (RX4/TX4).
+#ifndef TELEMETRY_LINK_ENABLE
+#define TELEMETRY_LINK_ENABLE 1
+#endif
+#ifndef TELEMETRY_LINK_BAUD
+#define TELEMETRY_LINK_BAUD 921600u
+#endif
+
 // Global compile-time safety gate for wheel command transmission.
 // 0 = never send IQREQ torque frames from Teensy
 // 1 = allow IQREQ torque TX (normal behavior)

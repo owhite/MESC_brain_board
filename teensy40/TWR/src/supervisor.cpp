@@ -5,6 +5,7 @@
 #include "test_can_transmit_mode.h"
 #include "balance_TWR_mode.h"
 #include "balance_debug_mode.h"
+#include "telemetry_link.h"
 
 // ---------------- Global Flags ----------------
 // These are set by the control ISR to signal the main loop.
@@ -16,6 +17,19 @@ static inline bool is_balance_mode(SupervisorMode m) {
   return (m == SUP_MODE_BALANCE_HOLD) ||
          (m == SUP_MODE_BALANCE_TWR) ||
          (m == SUP_MODE_BALANCE_DEBUG);
+}
+
+static const char* mode_to_str(SupervisorMode mode) {
+  switch (mode) {
+    case SUP_MODE_IDLE: return "SUP_MODE_IDLE";
+    case SUP_MODE_CALIBRATE: return "SUP_MODE_CALIBRATE";
+    case SUP_VERIFY_ANGLE: return "SUP_VERIFY_ANGLE";
+    case SUP_MODE_BALANCE_HOLD: return "SUP_MODE_BALANCE_HOLD";
+    case SUP_MODE_BALANCE_TWR: return "SUP_MODE_BALANCE_TWR";
+    case SUP_MODE_BALANCE_DEBUG: return "SUP_MODE_BALANCE_DEBUG";
+    case SUP_MODE_TEST_CAN: return "SUP_MODE_TEST_CAN";
+    default: return "SUP_MODE_UNKNOWN";
+  }
 }
 
 // Note there are multiple ISRs, some for the controlLoop(),
@@ -335,6 +349,22 @@ void controlLoop(Supervisor_typedef *sup,
   // ---- Core control loop body ----
   static SupervisorMode s_prev_mode = SUP_MODE_IDLE;
   if (sup->mode != s_prev_mode) {
+    if (!is_balance_mode(s_prev_mode) && is_balance_mode(sup->mode)) {
+#if TELEMETRY_LINK_ENABLE
+      Serial.printf(
+          "{\"cmd\":\"TELEM_LOG_START\",\"from\":\"%s\",\"to\":\"%s\",\"packet_size_bytes\":%lu,\"queued_packets\":%lu,\"queued_bytes\":%lu}\r\n",
+          mode_to_str(s_prev_mode),
+          mode_to_str(sup->mode),
+          (unsigned long)telemetry_packet_size_bytes(),
+          (unsigned long)telemetry_pending_packets(),
+          (unsigned long)telemetry_pending_bytes());
+#else
+      Serial.printf(
+          "{\"cmd\":\"TELEM_LOG_START\",\"from\":\"%s\",\"to\":\"%s\",\"packet_size_bytes\":0,\"queued_packets\":0,\"queued_bytes\":0}\r\n",
+          mode_to_str(s_prev_mode),
+          mode_to_str(sup->mode));
+#endif
+    }
     if (is_balance_mode(s_prev_mode) && !is_balance_mode(sup->mode)) {
       if (s_prev_mode == SUP_MODE_BALANCE_DEBUG) {
         balance_debug_dump_on_mode_exit("mode_exit");

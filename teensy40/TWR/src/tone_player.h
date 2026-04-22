@@ -32,10 +32,15 @@ void tone_start(TonePlayer* tp, uint32_t freq_hz, uint32_t dur_ms, uint32_t sile
 void tone_start_volume(TonePlayer* tp, uint32_t freq_hz, uint32_t dur_ms, uint32_t silence_ms, uint8_t volume_pct);
 
 // High-level tone sequences used by balance workflow.
+void start_calibrate_song();
 void start_calibrate_song(TonePlayer* tp);
+void start_idle_long_hold_song();
 void start_idle_long_hold_song(TonePlayer* tp);
+void update_idle_long_hold_song();
 void update_idle_long_hold_song(TonePlayer* tp);
+void update_calibrate_song();
 void update_calibrate_song(TonePlayer* tp);
+void balance_zero_cross_tweet();
 void balance_zero_cross_tweet(TonePlayer* tp);
 
 // Stop immediately (no post-silence)

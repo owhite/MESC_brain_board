@@ -15,6 +15,8 @@
 #include "test_can_transmit_mode.h"
 #include "balance_TWR_mode.h"
 #include "balance_debug_mode.h"
+#include "console_commands.h"
+#include "telemetry_link.h"
 
 // Compile-time A/B selector for balance mode entry routing.
 // 0 -> enter normal balance_TWR_mode()
@@ -78,6 +80,11 @@ static constexpr uint32_t CAL_AX_PRINT_PERIOD_US = 20000u; // 50 Hz while target
 static constexpr uint32_t IDLE_LONG_HOLD_US = 2000000u; // 2 seconds
 static uint32_t g_balance_mode_enter_us = 0u;
 static SupervisorMode g_prev_mode_for_exit_tweet = SUP_MODE_IDLE;
+static SupervisorMode g_prev_mode_for_telem_flush = SUP_MODE_IDLE;
+static bool g_telem_flush_after_balance_twr = false;
+static uint32_t g_telem_flush_start_us = 0u;
+static uint32_t g_telem_flush_start_packets = 0u;
+static uint32_t g_telem_flush_start_bytes = 0u;
 static uint16_t g_cal_kickstand_count = 0u;
 static float g_cal_kickstand_sum = 0.0f;
 static float g_cal_kickstand_pitch = 0.0f;
@@ -91,7 +98,7 @@ static bool g_idle_long_hold_tracking = false;
 static uint32_t g_idle_long_hold_start_us = 0u;
 static bool g_idle_long_hold_fired = false;
 // Temporary debug stream: while in balance mode, print raw accel vs filtered pitch.
-static constexpr bool TEMP_PRINT_BALANCE_IMU_ENABLE = true;
+static constexpr bool TEMP_PRINT_BALANCE_IMU_ENABLE = false;
 static constexpr uint32_t TEMP_PRINT_BALANCE_IMU_PERIOD_US = 10000u; // 100 Hz
 static uint32_t g_last_balance_imu_print_us = 0u;
 static float g_last_accel_x_g = 0.0f;
@@ -285,38 +292,6 @@ static void update_supervisor_imu(ICM42688 &imu_dev,
   sup.imu.last_update_us = now_us;
 }
 
-static void trim_ascii(char *s) {
-  if (s == nullptr) return;
-  size_t len = strlen(s);
-  size_t start = 0;
-  while (start < len && isspace((unsigned char)s[start])) start++;
-  size_t end = len;
-  while (end > start && isspace((unsigned char)s[end - 1])) end--;
-  if (start > 0 && end > start) {
-    memmove(s, s + start, end - start);
-  }
-  s[end - start] = '\0';
-}
-
-static void print_rc_channels_snapshot(const Supervisor_typedef &sup) {
-  Serial.printf(
-      "{\"cmd\":\"RC_CH\",\"count\":%u,\"throttle_ch\":%u,\"steer_ch\":%u,\"throttle_invert\":%d,\"steer_invert\":%d,\"deadband\":%.3f,\"max_torque_nm\":%.3f",
-      (unsigned int)sup.rc_count,
-      (unsigned int)(sup.user_rc_throttle_ch + 1u),
-      (unsigned int)(sup.user_rc_steer_ch + 1u),
-      sup.user_rc_throttle_invert ? 1 : 0,
-      sup.user_rc_steer_invert ? 1 : 0,
-      sup.user_rc_deadband,
-      sup.user_rc_max_torque_nm);
-  for (uint8_t i = 0u; i < sup.rc_count; ++i) {
-    Serial.printf(",\"ch%u_valid\":%d,\"ch%u_raw_us\":%u,\"ch%u_norm\":%.3f",
-                  (unsigned int)(i + 1u), sup.rc[i].valid ? 1 : 0,
-                  (unsigned int)(i + 1u), (unsigned int)sup.rc[i].raw_us,
-                  (unsigned int)(i + 1u), sup.rc[i].norm);
-  }
-  Serial.printf("}\r\n");
-}
-
 static inline float pitch_accel_from_last_sample() {
   return atan2f(g_last_accel_x_g, g_last_accel_z_g);
 }
@@ -368,254 +343,6 @@ static const char* mode_to_str(SupervisorMode mode) {
   }
 }
 
-// Compatibility wrapper for modules that still call the legacy no-arg API.
-void balance_zero_cross_tweet(void) {
-  balance_zero_cross_tweet(&g_tone);
-}
-
-static void process_serial_line(const char *line) {
-  uint32_t run_s = 0u;
-
-  if (line == nullptr) return;
-
-  if (strcmp(line, "run") == 0 || sscanf(line, "run %lu", &run_s) == 1) {
-    const SupervisorMode prev_mode = supervisor.mode;
-    const bool restart = (prev_mode == SUP_MODE_TEST_CAN);
-    uint32_t run_us = CAN_TEST_RUN_DEFAULT_US;
-    if (run_s > 0u) {
-      const uint64_t requested_us = (uint64_t)run_s * 1000000ull;
-      run_us = (requested_us > UINT32_MAX) ? UINT32_MAX : (uint32_t)requested_us;
-    }
-    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canResetPosvelStats();
-    canResetRuntimeStats();
-    test_can_transmit_mode_request_restart();
-    canRxBuf1.overflow_count = 0;
-    canRxBuf2.overflow_count = 0;
-    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-      supervisor.esc_alive_false_count[i] = 0u;
-    }
-    // Preserve current TX enable state so "tx off" is honored across runs.
-    supervisor.user_total_us = run_us;
-    supervisor.user_rc_drive_enable = false;
-    supervisor.mode = SUP_MODE_TEST_CAN;
-    g_balance_mode_enter_us = 0u;
-    Serial.printf(
-        "{\"cmd\":\"USER_RUN_REQUEST\",\"ok\":1,\"mode_from\":\"%s\",\"mode_to\":\"%s\",\"restart\":%d,\"run_us\":%lu,\"run_s\":%lu,\"tx_enable\":%d,\"tx_period_us\":%lu}\r\n",
-        mode_to_str(prev_mode),
-        mode_to_str(supervisor.mode),
-        restart ? 1 : 0,
-        (unsigned long)supervisor.user_total_us,
-        (unsigned long)(supervisor.user_total_us / 1000000u),
-        supervisor.user_tx_enable ? 1 : 0,
-        (unsigned long)supervisor.user_tx_period_us);
-    return;
-  }
-
-  if (strcmp(line, "balance run") == 0) {
-    const SupervisorMode balance_mode = selected_balance_entry_mode();
-    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canResetPosvelStats();
-    canResetRuntimeStats();
-    canRxBuf1.overflow_count = 0;
-    canRxBuf2.overflow_count = 0;
-    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-      supervisor.esc_alive_false_count[i] = 0u;
-    }
-    supervisor.user_tx_enable = true;
-    supervisor.user_total_us = BALANCE_BUTTON_RUN_US;
-    supervisor.mode = balance_mode;
-    g_balance_mode_enter_us = micros();
-    Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"%s\",\"run_us\":%lu}\r\n",
-                  mode_to_str(supervisor.mode),
-                  (unsigned long)supervisor.user_total_us);
-    return;
-  }
-
-  if (strcmp(line, "rc show") == 0) {
-    print_rc_channels_snapshot(supervisor);
-    return;
-  }
-
-  if (strcmp(line, "rc run") == 0) {
-    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canRxBuf1.overflow_count = 0;
-    canRxBuf2.overflow_count = 0;
-    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-      supervisor.esc_alive_false_count[i] = 0u;
-    }
-    supervisor.user_tx_enable = true;
-    supervisor.user_total_us = 0u;
-    supervisor.user_rc_drive_enable = true;
-    supervisor.mode = SUP_MODE_TEST_CAN;
-    Serial.printf(
-        "{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_TEST_CAN\",\"rc_drive\":1,"
-        "\"throttle_ch\":%u,\"steer_ch\":%u,\"throttle_invert\":%d,\"steer_invert\":%d,\"deadband\":%.3f,\"max_torque_nm\":%.3f,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
-        (unsigned int)(supervisor.user_rc_throttle_ch + 1u),
-        (unsigned int)(supervisor.user_rc_steer_ch + 1u),
-        supervisor.user_rc_throttle_invert ? 1 : 0,
-        supervisor.user_rc_steer_invert ? 1 : 0,
-        supervisor.user_rc_deadband,
-        supervisor.user_rc_max_torque_nm,
-        (unsigned long)supervisor.user_tx_period_us,
-        (supervisor.user_tx_period_us > 0u)
-            ? (1000000.0f / (float)supervisor.user_tx_period_us)
-            : 0.0f);
-    return;
-  }
-
-  if (strcmp(line, "rc stop") == 0) {
-    supervisor.user_rc_drive_enable = false;
-    supervisor.mode = SUP_MODE_IDLE;
-    g_balance_mode_enter_us = 0u;
-    supervisor.user_total_us = 0u;
-    Serial.printf("{\"cmd\":\"MODE\",\"source\":\"serial\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"rc_stop\"}\r\n");
-    return;
-  }
-
-  float rc_max_nm = 0.0f;
-  if (sscanf(line, "rc max %f", &rc_max_nm) == 1) {
-    if (!(rc_max_nm >= 0.0f && rc_max_nm <= 2.0f)) {
-      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"max_torque_out_of_range\",\"value\":%.3f,\"min\":0.0,\"max\":2.0}\r\n",
-                    rc_max_nm);
-    } else {
-      supervisor.user_rc_max_torque_nm = rc_max_nm;
-      Serial.printf("{\"cmd\":\"RC_CFG\",\"max_torque_nm\":%.3f}\r\n", supervisor.user_rc_max_torque_nm);
-    }
-    return;
-  }
-
-  uint32_t rc_ch_t = 0u;
-  uint32_t rc_ch_s = 0u;
-  if (sscanf(line, "rc ch %lu %lu", &rc_ch_t, &rc_ch_s) == 2) {
-    if (rc_ch_t < 1u || rc_ch_s < 1u ||
-        rc_ch_t > supervisor.rc_count || rc_ch_s > supervisor.rc_count) {
-      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"channel_out_of_range\",\"count\":%u}\r\n",
-                    (unsigned int)supervisor.rc_count);
-    } else {
-      supervisor.user_rc_throttle_ch = (uint8_t)(rc_ch_t - 1u);
-      supervisor.user_rc_steer_ch = (uint8_t)(rc_ch_s - 1u);
-      Serial.printf("{\"cmd\":\"RC_CFG\",\"throttle_ch\":%u,\"steer_ch\":%u}\r\n",
-                    (unsigned int)rc_ch_t, (unsigned int)rc_ch_s);
-    }
-    return;
-  }
-
-  uint32_t inv_t = 0u;
-  uint32_t inv_s = 0u;
-  if (sscanf(line, "rc invert %lu %lu", &inv_t, &inv_s) == 2) {
-    if ((inv_t > 1u) || (inv_s > 1u)) {
-      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"invert_out_of_range\",\"expected\":\"0_or_1\"}\r\n");
-    } else {
-      supervisor.user_rc_throttle_invert = (inv_t != 0u);
-      supervisor.user_rc_steer_invert = (inv_s != 0u);
-      Serial.printf("{\"cmd\":\"RC_CFG\",\"throttle_invert\":%d,\"steer_invert\":%d}\r\n",
-                    supervisor.user_rc_throttle_invert ? 1 : 0,
-                    supervisor.user_rc_steer_invert ? 1 : 0);
-    }
-    return;
-  }
-
-  float rc_deadband = 0.0f;
-  if (sscanf(line, "rc deadband %f", &rc_deadband) == 1) {
-    if (!(rc_deadband >= 0.0f && rc_deadband < 0.5f)) {
-      Serial.printf("{\"cmd\":\"RC_CFG_ERR\",\"reason\":\"deadband_out_of_range\",\"value\":%.3f,\"min\":0.0,\"max\":0.49}\r\n",
-                    rc_deadband);
-    } else {
-      supervisor.user_rc_deadband = rc_deadband;
-      Serial.printf("{\"cmd\":\"RC_CFG\",\"deadband\":%.3f}\r\n", supervisor.user_rc_deadband);
-    }
-    return;
-  }
-
-  if (strcmp(line, "verify_angle") == 0) {
-    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    supervisor.user_verify_motor_enable = false;
-    supervisor.mode = SUP_VERIFY_ANGLE;
-    Serial.printf(
-      "{\"cmd\":\"MODE\",\"mode\":\"SUP_VERIFY_ANGLE\",\"motor\":0}\r\n");
-    return;
-  }
-
-  if (strcmp(line, "motor") == 0) {
-    tone_start(&g_tone, PB_BEEP_HZ, PB_BEEP_MS, PB_GAP_MS);
-    canRxBuf1.overflow_count = 0;
-    canRxBuf2.overflow_count = 0;
-    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-      supervisor.esc_alive_false_count[i] = 0u;
-    }
-    supervisor.mode = SUP_VERIFY_ANGLE;
-    if (supervisor.user_verify_motor_enable) {
-      supervisor.user_verify_motor_enable = false;
-      Serial.printf(
-        "{\"cmd\":\"MODE\",\"mode\":\"SUP_VERIFY_ANGLE\",\"motor\":0,\"tau_left_nm\":%.3f,\"tau_right_nm\":%.3f}\r\n",
-        supervisor.user_verify_tau_left,
-        supervisor.user_verify_tau_right);
-    } else {
-      supervisor.user_verify_motor_enable = true;
-      supervisor.user_verify_tau_left = 2.0f;
-      supervisor.user_verify_tau_right = -2.0f;
-      Serial.printf(
-        "{\"cmd\":\"MODE\",\"mode\":\"SUP_VERIFY_ANGLE\",\"motor\":1,\"tau_left_nm\":%.3f,\"tau_right_nm\":%.3f}\r\n",
-        supervisor.user_verify_tau_left,
-        supervisor.user_verify_tau_right);
-    }
-    return;
-  }
-
-  if (strcmp(line, "tx off") == 0) {
-    supervisor.user_tx_enable = false;
-    Serial.printf("{\"cmd\":\"CAN_TX_CFG\",\"tx_enable\":0,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
-                  (unsigned long)supervisor.user_tx_period_us,
-                  (supervisor.user_tx_period_us > 0u)
-                    ? (1000000.0f / (float)supervisor.user_tx_period_us)
-                    : 0.0f);
-    return;
-  }
-
-  if (strcmp(line, "tx on") == 0) {
-    supervisor.user_tx_enable = true;
-    Serial.printf("{\"cmd\":\"CAN_TX_CFG\",\"tx_enable\":1,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
-                  (unsigned long)supervisor.user_tx_period_us,
-                  (supervisor.user_tx_period_us > 0u)
-                    ? (1000000.0f / (float)supervisor.user_tx_period_us)
-                    : 0.0f);
-    return;
-  }
-
-  if (strcmp(line, "stats reset") == 0) {
-    canResetPosvelStats();
-    canResetRuntimeStats();
-    canRxBuf1.overflow_count = 0;
-    canRxBuf2.overflow_count = 0;
-    for (uint16_t i = 0; i < supervisor.esc_count; ++i) {
-      supervisor.esc_alive_false_count[i] = 0u;
-    }
-    Serial.printf("{\"cmd\":\"CAN_STATS_RESET\",\"ok\":1}\r\n");
-    return;
-  }
-
-  uint32_t hz = 0;
-  if (sscanf(line, "tx hz %lu", &hz) == 1) {
-    if (hz == 0u || hz > 2000u) {
-      Serial.printf("{\"cmd\":\"CAN_TX_CFG_ERR\",\"reason\":\"hz_out_of_range\",\"hz\":%lu,\"min\":1,\"max\":2000}\r\n",
-                    (unsigned long)hz);
-    } else {
-      supervisor.user_tx_period_us = 1000000u / hz;
-      if (supervisor.user_tx_period_us == 0u) supervisor.user_tx_period_us = 1u;
-      Serial.printf("{\"cmd\":\"CAN_TX_CFG\",\"tx_enable\":%d,\"tx_period_us\":%lu,\"tx_hz\":%.2f}\r\n",
-                    supervisor.user_tx_enable ? 1 : 0,
-                    (unsigned long)supervisor.user_tx_period_us,
-                    (supervisor.user_tx_period_us > 0u)
-                      ? (1000000.0f / (float)supervisor.user_tx_period_us)
-                      : 0.0f);
-    }
-    return;
-  }
-
-  Serial.printf("{\"cmd\":\"CAN_CMD_ERR\",\"line\":\"%s\"}\r\n", line);
-}
-
 // --------------------- LED instances -----------------------
 static LEDCtrl g_led_red;
 LEDCtrl g_led_green;
@@ -625,6 +352,13 @@ void setup() {
   Serial.begin(921600);
   while (!Serial && millis() < 1500) {}
   // CAN2 uses pins 0/1 on Teensy 4.0, so avoid Serial1 on those same pins.
+#if TELEMETRY_LINK_ENABLE
+  telemetry_link_init(Serial4, TELEMETRY_LINK_BAUD);
+  Serial.printf("{\"cmd\":\"TELEM_LINK_CFG\",\"enabled\":1,\"port\":\"Serial4\",\"baud\":%lu}\r\n",
+                (unsigned long)TELEMETRY_LINK_BAUD);
+#else
+  Serial.printf("{\"cmd\":\"TELEM_LINK_CFG\",\"enabled\":0}\r\n");
+#endif
 
   // LEDs / Pushbutton / Tone
   led_init(&g_led_red,   LED1_PIN, LED_BLINK_SLOW);
@@ -697,6 +431,7 @@ void setup() {
   // Start in idle; require explicit serial command or pushbutton calibrate flow.
   supervisor.mode = SUP_MODE_IDLE;
   g_prev_mode_for_exit_tweet = supervisor.mode;
+  g_prev_mode_for_telem_flush = supervisor.mode;
   reset_calibration_state();
   supervisor.user_total_us = 0;
   supervisor.user_tx_enable = true;
@@ -705,6 +440,10 @@ void setup() {
   canResetRuntimeStats();
   canRxBuf1.overflow_count = 0;
   canRxBuf2.overflow_count = 0;
+  Serial.printf("{\"cmd\":\"CONSOLE_CFG\",\"enabled\":%d,\"echo\":%d,\"char_budget\":%lu}\r\n",
+                SERIAL_CONSOLE_ENABLE ? 1 : 0,
+                SERIAL_CONSOLE_ECHO ? 1 : 0,
+                (unsigned long)SERIAL_CONSOLE_CHAR_BUDGET_PER_CALL);
 
   // ---- Control tick ISR ----
   g_ctrlTimer.priority(CONTROL_LOOP_PRIORITY);
@@ -805,7 +544,7 @@ void loop() {
       g_balance_mode_enter_us = 0u;
       supervisor.user_total_us = 0u;
       reset_calibration_state();
-      start_idle_long_hold_song(&g_tone);
+      start_idle_long_hold_song();
       Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"button_long_hold\"}\r\n");
     }
   } else {
@@ -839,29 +578,13 @@ void loop() {
 
         if (in_window && !g_cal_target_reached_announced) {
           g_cal_target_reached_announced = true;
-          balance_zero_cross_tweet(&g_tone);
+          balance_zero_cross_tweet();
           Serial.printf(
               "{\"cmd\":\"CAL_TARGET_REACHED\",\"pitch_accel_rad\":%.6f,\"kickstand_pitch_rad\":%.6f,\"delta_rad\":%.6f,\"target_delta_rad\":%.6f}\r\n",
               pitch_accel,
               g_cal_kickstand_pitch,
               delta_from_kickstand,
               CAL_TARGET_DELTA_RAD);
-        }
-
-        if (in_window &&
-            ((g_cal_last_ax_print_us == 0u) ||
-             ((uint32_t)(now_us - g_cal_last_ax_print_us) >= CAL_AX_PRINT_PERIOD_US))) {
-          g_cal_last_ax_print_us = now_us;
-          Serial.printf(
-              "{\"cmd\":\"CAL_AX\",\"t\":%lu,\"a_x_g\":%.6f,\"a_y_g\":%.6f,\"a_z_g\":%.6f,\"pitch_accel_rad\":%.6f,\"delta_rad\":%.6f,\"eq_err_rad\":%.6f,\"pitch_rate_rad_s\":%.6f}\r\n",
-              (unsigned long)now_us,
-              g_last_accel_x_g,
-              g_last_accel_y_g,
-              g_last_accel_z_g,
-              pitch_accel,
-              delta_from_kickstand,
-              eq_err_rad,
-              supervisor.imu.pitch_rate);
         }
 
         if (in_window && low_energy) {
@@ -877,7 +600,7 @@ void loop() {
             supervisor.mode = SUP_MODE_BALANCE_TWR;
             g_balance_mode_enter_us = now_us;
             balance_TWR_set_theta_reference(g_cal_theta_eq_target, 0.0f);
-            balance_zero_cross_tweet(&g_tone);
+            balance_zero_cross_tweet();
             Serial.printf(
                 "{\"cmd\":\"MODE\",\"source\":\"calibrate\",\"mode\":\"SUP_MODE_BALANCE_TWR\",\"theta_eq_rad\":%.6f,\"pitch_accel_rad\":%.6f,\"pitch_rate_rad_s\":%.6f,\"hold_ms\":%lu}\r\n",
                 g_cal_theta_eq_target,
@@ -907,9 +630,9 @@ void loop() {
   }
   led_update(&g_led_green, now_us);
   tone_update(&g_tone, now_us);
-  update_idle_long_hold_song(&g_tone);
+  update_idle_long_hold_song();
   if (supervisor.mode == SUP_MODE_CALIBRATE) {
-    update_calibrate_song(&g_tone);
+    update_calibrate_song();
   }
 
   if (TEMP_PRINT_BALANCE_IMU_ENABLE &&
@@ -952,12 +675,12 @@ void loop() {
         g_balance_mode_enter_us = 0u;
         supervisor.user_total_us = 0u;
         reset_calibration_state();
-        start_idle_long_hold_song(&g_tone);
+        start_idle_long_hold_song();
         Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_IDLE\",\"reason\":\"button_press_reset\"}\r\n");
       } else if (supervisor.mode == SUP_MODE_IDLE) {
         reset_calibration_state();
         supervisor.mode = SUP_MODE_CALIBRATE;
-        start_calibrate_song(&g_tone);
+        start_calibrate_song();
         Serial.printf("{\"cmd\":\"MODE\",\"source\":\"button\",\"mode\":\"SUP_MODE_CALIBRATE\"}\r\n");
       }
     }
@@ -977,8 +700,44 @@ void loop() {
   }
 #endif
 
-  static char input_buf[96] = {0};
-  static size_t input_len = 0;
+  // Keep ESP32 telemetry link drained continuously without blocking control flow.
+#if TELEMETRY_LINK_ENABLE
+  if (!g_telem_flush_after_balance_twr &&
+      g_prev_mode_for_telem_flush == SUP_MODE_BALANCE_TWR &&
+      supervisor.mode == SUP_MODE_IDLE) {
+    g_telem_flush_after_balance_twr = true;
+    g_telem_flush_start_us = micros();
+    g_telem_flush_start_packets = telemetry_pending_packets();
+    g_telem_flush_start_bytes = telemetry_pending_bytes();
+    Serial.printf(
+        "{\"cmd\":\"TELEM_FLUSH_START\",\"from\":%d,\"to\":%d,\"packet_size_bytes\":%lu,\"queued_packets\":%lu,\"queued_bytes\":%lu}\r\n",
+        (int)g_prev_mode_for_telem_flush,
+        (int)supervisor.mode,
+        (unsigned long)telemetry_packet_size_bytes(),
+        (unsigned long)g_telem_flush_start_packets,
+        (unsigned long)g_telem_flush_start_bytes);
+  }
+
+  if (g_telem_flush_after_balance_twr && supervisor.mode == SUP_MODE_IDLE) {
+    telemetry_uart_pump();
+    if (!telemetry_has_pending()) {
+      const uint32_t end_packets = telemetry_pending_packets();
+      const uint32_t end_bytes = telemetry_pending_bytes();
+      const uint32_t elapsed_us = (uint32_t)(micros() - g_telem_flush_start_us);
+      Serial.printf(
+          "{\"cmd\":\"TELEM_FLUSH_END\",\"packet_size_bytes\":%lu,\"start_packets\":%lu,\"start_bytes\":%lu,\"remaining_packets\":%lu,\"remaining_bytes\":%lu,\"elapsed_us\":%lu}\r\n",
+          (unsigned long)telemetry_packet_size_bytes(),
+          (unsigned long)g_telem_flush_start_packets,
+          (unsigned long)g_telem_flush_start_bytes,
+          (unsigned long)end_packets,
+          (unsigned long)end_bytes,
+          (unsigned long)elapsed_us);
+      g_telem_flush_after_balance_twr = false;
+    }
+  }
+#endif
+  g_prev_mode_for_telem_flush = supervisor.mode;
+
   // -------- LOW PRIORITY --------
   // These functions are intentionally throttled and run infrequently.
   // ---
@@ -988,31 +747,19 @@ void loop() {
   if (now_us - last_lowprio_us >= (CONTROL_PERIOD_US * 100)) {
     last_lowprio_us = now_us;
 
-	    while (Serial.available()) {
-	      char c = Serial.read();
-        Serial.write((uint8_t)c);  // Echo input characters back to terminal.
-	      if (c == '\r' || c == '\n') {
-          if (input_len > 0u) {
-            input_buf[input_len] = '\0';
-            trim_ascii(input_buf);
-            if (input_buf[0] != '\0') {
-              process_serial_line(input_buf);
-            }
-            input_len = 0u;
-            input_buf[0] = '\0';
-          }
-	      } else if (c == '\b' || c == 127) {
-          if (input_len > 0u) {
-            input_len--;
-            input_buf[input_len] = '\0';
-          }
-        } else if (isprint((unsigned char)c)) {
-          if (input_len < (sizeof(input_buf) - 1u)) {
-            input_buf[input_len++] = c;
-            input_buf[input_len] = '\0';
-          }
-        }
-	    }
+#if SERIAL_CONSOLE_ENABLE
+    ConsoleCommandContext cmd_ctx{
+      &supervisor,
+      &g_tone,
+      &canRxBuf1,
+      &canRxBuf2,
+      &g_balance_mode_enter_us,
+      selected_balance_entry_mode(),
+      CAN_TEST_RUN_DEFAULT_US,
+      BALANCE_BUTTON_RUN_US
+    };
+    console_process_serial(cmd_ctx);
+#endif
 
     // LOW-RATE UPDATES
     if (millis() - supervisor.last_health_ms > 1000) {

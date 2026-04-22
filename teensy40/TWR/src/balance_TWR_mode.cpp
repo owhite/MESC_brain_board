@@ -2,6 +2,7 @@
 
 #include "CAN_helper.h"
 #include "main.h"
+#include "telemetry_link.h"
 
 #include <Arduino.h>
 #include <math.h>
@@ -79,6 +80,10 @@ static constexpr float RC_STEER_TORQUE_MAX_NM = 0.35f;
 // Isolation test: keep disabled while investigating slow equilibrium drift.
 static constexpr float K_YAW_P = 0.0f; // Torque per radian of heading error
 static constexpr float K_YAW_D = 0.0f; // Damping for yaw-rate error
+// "Stable on kickstand" proxy bit for telemetry consumers.
+static constexpr float KICKSTAND_STABLE_THETA_ERR_RAD = 0.03f;
+static constexpr float KICKSTAND_STABLE_THETA_DOT_RAD_S = 0.15f;
+static constexpr float KICKSTAND_STABLE_WHEEL_VEL_RAD_S = 1.0f;
 
 // ESC POS telemetry plausibility guard (expects wrapped radians in [0, 2*pi)).
 static constexpr float POS_RAW_MIN_RAD = -0.5f;
@@ -95,6 +100,7 @@ static uint32_t g_zero_cross_arm_us = 0u;
 static float g_theta_eq = 0.0f;
 static float g_theta_dot_bias = 0.0f;
 static bool g_theta_ref_preloaded = false;
+static bool g_is_tared = false;
 
 static bool g_unwrap_init = false;
 static float g_prev_l = 0.0f;
@@ -138,6 +144,7 @@ static inline void reset_balance_state() {
   g_zero_cross_arm_us = 0u;
   g_theta_dot_bias = 0.0f;
   g_theta_ref_preloaded = false;
+  g_is_tared = false;
 
   g_unwrap_init = false;
   g_prev_l = 0.0f;
@@ -251,20 +258,70 @@ void balance_TWR_set_theta_reference(float theta_eq_rad, float theta_dot_bias_ra
   g_theta_eq = theta_eq_rad;
   g_theta_dot_bias = theta_dot_bias_rad_s;
   g_theta_ref_preloaded = true;
+  g_is_tared = true;
 }
 
 void balance_TWR_mode(Supervisor_typedef *sup,
                       FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> &can1,
                       FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> &can2) {
   if (sup == nullptr) return;
+  const uint32_t now_us = micros();
+  float dt_s = 0.0f;
+  float theta = 0.0f;
+  float theta_dot = 0.0f;
+  float theta_ref = 0.0f;
+  float theta_err = 0.0f;
+  float x_wheel_m = 0.0f;
+  float x_dot_m_s = 0.0f;
+  float x_pos_err_m = 0.0f;
+  float tau_l_cmd = 0.0f;
+  float tau_r_cmd = 0.0f;
+  float u_sync = 0.0f;
+  float u_i = 0.0f;
+  bool x_hold_enabled = false;
+  bool esc_comms_ok = false;
+  bool is_stable_on_kickstand = false;
+  uint32_t telem_state_bits = 0u;
+  uint16_t telem_status = 0u;
+  uint16_t telem_event = TELEMETRY_EVENT_NONE;
+  auto refresh_telem_state_bits = [&]() {
+    telem_state_bits = 0u;
+    if (x_hold_enabled) telem_state_bits |= TELEMETRY_STATE_X_HOLD_ENABLED;
+    if (g_is_tared) telem_state_bits |= TELEMETRY_STATE_IS_TARED;
+    if (esc_comms_ok) telem_state_bits |= TELEMETRY_STATE_ESC_COMMS_OK;
+    if (is_stable_on_kickstand) telem_state_bits |= TELEMETRY_STATE_STABLE_ON_KICKSTAND;
+  };
+  auto publish_telem = [&]() {
+    refresh_telem_state_bits();
+    BalanceTelemetrySample sample = {};
+    sample.timestamp_us = now_us;
+    sample.state_bits = telem_state_bits;
+    sample.status_flags = telem_status;
+    sample.event_code = telem_event;
+    sample.dt_s = dt_s;
+    sample.theta = theta;
+    sample.theta_dot = theta_dot;
+    sample.theta_err = theta_err;
+    sample.x_wheel_m = x_wheel_m;
+    sample.x_dot_m_s = x_dot_m_s;
+    sample.x_pos_err_m = x_pos_err_m;
+    sample.tau_l_cmd = tau_l_cmd;
+    sample.tau_r_cmd = tau_r_cmd;
+    sample.u_sync = u_sync;
+    sample.u_i = u_i;
+    telemetry_publish_balance_tick(sample);
+  };
+
   if (sup->esc_count < 2u) {
-    send_zero_and_idle(sup, can1, can2, micros(), BALANCE_TX_PERIOD_US, sup->user_tx_enable);
+    telem_status |= TELEMETRY_STATUS_FAIL_SAFE;
+    telem_event = TELEMETRY_EVENT_STALE_ESC_L;
+    publish_telem();
+    send_zero_and_idle(sup, can1, can2, now_us, BALANCE_TX_PERIOD_US, sup->user_tx_enable);
     return;
   }
 
-  const uint32_t now_us = micros();
   const float dt_s_raw = (float)sup->timing.dt_us * 1.0e-6f;
-  const float dt_s = (dt_s_raw >= 0.0005f && dt_s_raw <= 0.01f) ? dt_s_raw : 0.001f;
+  dt_s = (dt_s_raw >= 0.0005f && dt_s_raw <= 0.01f) ? dt_s_raw : 0.001f;
 
   if (g_first_entry) {
     g_first_entry = false;
@@ -277,6 +334,7 @@ void balance_TWR_mode(Supervisor_typedef *sup,
       // Fallback if balance mode is entered without explicit calibration.
       g_theta_eq = sup->imu.pitch_rad;
       g_theta_dot_bias = sup->imu.pitch_rate;
+      g_is_tared = false;
     }
     g_theta_ref_preloaded = false;
     g_unwrap_init = false;
@@ -293,7 +351,20 @@ void balance_TWR_mode(Supervisor_typedef *sup,
                            ((uint32_t)(now_us - sup->esc[0].status.last_update_us) <= ESC_TIMEOUT_US);
   const bool esc_r_fresh = sup->esc[1].state.alive &&
                            ((uint32_t)(now_us - sup->esc[1].status.last_update_us) <= ESC_TIMEOUT_US);
+  esc_comms_ok = esc_l_fresh && esc_r_fresh;
+  if (imu_fresh) telem_status |= TELEMETRY_STATUS_IMU_FRESH;
+  if (esc_l_fresh) telem_status |= TELEMETRY_STATUS_ESC_L_FRESH;
+  if (esc_r_fresh) telem_status |= TELEMETRY_STATUS_ESC_R_FRESH;
   if (!imu_fresh || !esc_l_fresh || !esc_r_fresh) {
+    telem_status |= TELEMETRY_STATUS_FAIL_SAFE;
+    if (!imu_fresh) {
+      telem_event = TELEMETRY_EVENT_STALE_IMU;
+    } else if (!esc_l_fresh) {
+      telem_event = TELEMETRY_EVENT_STALE_ESC_L;
+    } else {
+      telem_event = TELEMETRY_EVENT_STALE_ESC_R;
+    }
+    publish_telem();
     const uint32_t tx_period_us_fallback =
         (sup->user_tx_period_us > 0u) ? sup->user_tx_period_us : BALANCE_TX_PERIOD_US;
     send_zero_and_idle(sup, can1, can2, now_us, tx_period_us_fallback, sup->user_tx_enable);
@@ -305,10 +376,13 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   const bool tx_enabled = sup->user_tx_enable && (SEND_TORQUE != 0);
   const bool tx_due = (g_last_tx_us == 0u) ||
                       ((uint32_t)(now_us - g_last_tx_us) >= tx_period_us);
+  if (tx_enabled) telem_status |= TELEMETRY_STATUS_TX_ENABLED;
+  if (tx_due) telem_status |= TELEMETRY_STATUS_TX_DUE;
 
-  const float theta = sup->imu.pitch_rad - g_theta_eq;
-  const float theta_dot = sup->imu.pitch_rate - g_theta_dot_bias;
+  theta = sup->imu.pitch_rad - g_theta_eq;
+  theta_dot = sup->imu.pitch_rate - g_theta_dot_bias;
   const bool hold_mode = (sup->mode == SUP_MODE_BALANCE_HOLD);
+  if (hold_mode) telem_status |= TELEMETRY_STATUS_HOLD_MODE;
 
   float rc_throttle_cmd = 0.0f;
   float rc_steer_cmd = 0.0f;
@@ -337,8 +411,8 @@ void balance_TWR_mode(Supervisor_typedef *sup,
     g_rc_throttle_cmd_filt = 0.0f;
     g_rc_steer_cmd_filt = 0.0f;
   }
-  const float theta_ref = hold_mode ? 0.0f : (RC_THROTTLE_THETA_REF_MAX_RAD * g_rc_throttle_cmd_filt);
-  const float theta_err = theta - theta_ref;
+  theta_ref = hold_mode ? 0.0f : (RC_THROTTLE_THETA_REF_MAX_RAD * g_rc_throttle_cmd_filt);
+  theta_err = theta - theta_ref;
 
   int8_t theta_sign = 0;
   if (theta_err > ZERO_CROSS_HYST_RAD) theta_sign = 1;
@@ -359,12 +433,12 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   const float vel_l = sup->esc[0].state.vel_rad_s;
   const float vel_r = sup->esc[1].state.vel_rad_s;
 
-  float x_wheel_m = 0.0f;
-  float x_dot_m_s = 0.0f;
   update_wheel_unwrap(pos_l, pos_r, vel_l, vel_r, dt_s, &x_wheel_m, &x_dot_m_s);
+  if (g_pos_range_ok) telem_status |= TELEMETRY_STATUS_POS_RANGE_OK;
+  if (g_pos_step_ok) telem_status |= TELEMETRY_STATUS_POS_STEP_OK;
   float yaw_error = (g_unwrap_l - g_unwrap_r) - g_yaw_ref; // Relative to tare heading
   float yaw_rate_error = g_vel_filt_l - g_vel_filt_r; // Difference in wheel speed
-  float u_sync = (K_YAW_P * yaw_error) + (K_YAW_D * yaw_rate_error);
+  u_sync = (K_YAW_P * yaw_error) + (K_YAW_D * yaw_rate_error);
   if (!g_x_ref_init) {
     // Lock position reference at balance start so "hold position" means
     // return to this wheel-center location after disturbances.
@@ -374,8 +448,13 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   // Position-hold error: positive when wheel center is behind reference.
   // Using (ref - measured) here sets the x-channel control direction
   // explicitly for restoring motion toward the locked reference.
-  const float x_pos_err_m = g_x_ref_m - x_wheel_m;
+  x_pos_err_m = g_x_ref_m - x_wheel_m;
   const float x_dot_err_m_s = -x_dot_m_s;
+  is_stable_on_kickstand = hold_mode &&
+                           (fabsf(theta_err) <= KICKSTAND_STABLE_THETA_ERR_RAD) &&
+                           (fabsf(theta_dot) <= KICKSTAND_STABLE_THETA_DOT_RAD_S) &&
+                           (fabsf(vel_l) <= KICKSTAND_STABLE_WHEEL_VEL_RAD_S) &&
+                           (fabsf(vel_r) <= KICKSTAND_STABLE_WHEEL_VEL_RAD_S);
 
   // In hold mode, allow a very slow x_ref recenter only after prolonged
   // upright stability. This trims steady bias without fighting balance.
@@ -399,6 +478,9 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   }
 
   if (!BALANCE_FIXED_TORQUE_TEST && (!g_pos_range_ok || !g_pos_step_ok)) {
+    telem_status |= TELEMETRY_STATUS_FAIL_SAFE;
+    telem_event = g_pos_range_ok ? TELEMETRY_EVENT_POS_STEP_FAIL : TELEMETRY_EVENT_POS_RANGE_FAIL;
+    publish_telem();
     send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
     return;
   }
@@ -406,6 +488,9 @@ void balance_TWR_mode(Supervisor_typedef *sup,
 
   if (!BALANCE_FIXED_TORQUE_TEST &&
       (fabsf(theta) > THETA_FAIL_RAD || fabsf(vel_l) > VEL_FAIL_RAD_S || fabsf(vel_r) > VEL_FAIL_RAD_S)) {
+    telem_status |= TELEMETRY_STATUS_FAIL_SAFE;
+    telem_event = (fabsf(theta) > THETA_FAIL_RAD) ? TELEMETRY_EVENT_THETA_FAIL : TELEMETRY_EVENT_VEL_FAIL;
+    publish_telem();
     send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
     return;
   }
@@ -417,10 +502,11 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   //   toward its centered location instead of drifting while "upright".
   // - slow integral on x_pos_err rejects small steady-state bias torques.
   // Tilt-priority gate: disable x channel when tilt recovery is active.
-  const bool x_hold_enabled =
+  x_hold_enabled =
       (fabsf(theta_err) <= X_HOLD_ENABLE_THETA_RAD) &&
       (fabsf(theta_dot) <= X_HOLD_ENABLE_THETA_DOT_RAD_S) &&
       (fabsf(x_dot_m_s) <= X_HOLD_ENABLE_X_DOT_M_S);
+  if (x_hold_enabled) telem_status |= TELEMETRY_STATUS_X_HOLD_ENABLED;
 
   const float k_x = BALANCE_TARE_VALIDATION_MODE ? 0.0f : K_DISC[2];
   const float k_x_dot = BALANCE_TARE_VALIDATION_MODE ? 0.0f : K_DISC[3];
@@ -446,17 +532,17 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   const float u_theta_dot = -(K_DISC[1] * theta_dot) * SAFETY_SCALE;
   const float u_x = x_hold_enabled ? (-(k_x * x_pos_err_m) * SAFETY_SCALE) : 0.0f;
   const float u_x_dot = x_hold_enabled ? (-(k_x_dot * x_dot_err_m_s) * SAFETY_SCALE) : 0.0f;
-  const float u_i = -(u_x_i) * SAFETY_SCALE;
+  u_i = -(u_x_i) * SAFETY_SCALE;
   const float u_balance = u_theta + u_theta_dot + u_x + u_x_dot + u_i;
   const float u_model = BALANCE_FIXED_TORQUE_TEST
                             ? BALANCE_FIXED_TORQUE_NM
                             : u_balance;
   const float u_steer = hold_mode ? 0.0f : (RC_STEER_TORQUE_MAX_NM * g_rc_steer_cmd_filt);
+  const float u_cmd = clampf(u_model, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+  tau_l_cmd = clampf(-u_cmd + u_steer - u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
+  tau_r_cmd = clampf( u_cmd + u_steer + u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
 
   if (tx_due) {
-    float u_cmd = clampf(u_model, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
-    float tau_l_cmd = clampf(-u_cmd + u_steer - u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
-    float tau_r_cmd = clampf( u_cmd + u_steer + u_sync, -TORQUE_CLAMP_NM, TORQUE_CLAMP_NM);
     g_last_tx_us = now_us;
     if (tx_enabled) {
       (void)send_iqreq_checked(tau_l_cmd, sup->esc[0].config.node_id, can1, can2);
@@ -472,10 +558,13 @@ void balance_TWR_mode(Supervisor_typedef *sup,
   if (sup->user_total_us > 0u) {
     const uint32_t elapsed_us = now_us - g_start_us;
     if (elapsed_us >= sup->user_total_us) {
+      publish_telem();
       send_zero_and_idle(sup, can1, can2, now_us, tx_period_us, tx_enabled);
       return;
     }
   }
+
+  publish_telem();
 }
 
 void balance_TWR_dump_on_mode_exit(const char *reason) {

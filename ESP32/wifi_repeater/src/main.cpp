@@ -11,15 +11,15 @@ static const uint16_t TCP_PORT = 9000;
 
 // UART to Teensy (ESP32 side). Use UART2 by default.
 static const int UART_NUM = 2;
-static const int UART_RX_PIN = 16;               // ESP32 RX  (connect to Teensy TX1)
-static const int UART_TX_PIN = 17;               // ESP32 TX  (connect to Teensy RX1)
-static const uint32_t UART_BAUD = 115200;
+static const int UART_RX_PIN = 16;               // ESP32 RX  (connect to Teensy Serial4 TX / pin 17)
+static const int UART_TX_PIN = 17;               // ESP32 TX  (connect to Teensy Serial4 RX / pin 16)
+static const uint32_t UART_BAUD = 921600;
 
 // Buffer sizing
 static const size_t BUF_SZ = 4096;
 
 // While proving the chain, use test-drop mode (never stall UART reads).
-static const bool LOSSLESS_MODE = false;
+static const bool LOSSLESS_MODE = true;
 
 // Debug serial (USB) baud
 static const uint32_t DEBUG_BAUD = 115200;

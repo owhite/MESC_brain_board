@@ -5,6 +5,7 @@
 // Single speaker: one IntervalTimer + one pin.
 static IntervalTimer s_tpTimer;
 static uint8_t       s_tpPin   = 255;
+static TonePlayer*   s_default_tp = nullptr;
 static volatile bool s_level   = false;
 static volatile bool s_half_volume_mode = false;
 static volatile uint8_t s_pwm_phase = 0u; // 0..3, used only in half-volume mode
@@ -82,6 +83,7 @@ void tone_init(TonePlayer* tp, uint8_t pin) {
   tp->play_end_us = 0;
   tp->silence_end_us = 0;
   tp->freq_hz = 0;
+  s_default_tp = tp;
 
   s_tpPin = pin;
   pinMode(pin, OUTPUT);
@@ -163,6 +165,11 @@ void start_calibrate_song(TonePlayer* tp) {
   s_cal_song_index++;
 }
 
+void start_calibrate_song() {
+  if (s_default_tp == nullptr) return;
+  start_calibrate_song(s_default_tp);
+}
+
 void start_idle_long_hold_song(TonePlayer* tp) {
   tone_stop(tp);
   s_idle_long_song_active = true;
@@ -172,6 +179,11 @@ void start_idle_long_hold_song(TonePlayer* tp) {
              IDLE_LONG_SONG_NOTE_MS,
              IDLE_LONG_SONG_GAP_MS);
   s_idle_long_song_index++;
+}
+
+void start_idle_long_hold_song() {
+  if (s_default_tp == nullptr) return;
+  start_idle_long_hold_song(s_default_tp);
 }
 
 void update_idle_long_hold_song(TonePlayer* tp) {
@@ -190,6 +202,11 @@ void update_idle_long_hold_song(TonePlayer* tp) {
   s_idle_long_song_index++;
 }
 
+void update_idle_long_hold_song() {
+  if (s_default_tp == nullptr) return;
+  update_idle_long_hold_song(s_default_tp);
+}
+
 void update_calibrate_song(TonePlayer* tp) {
   if (!s_cal_song_active) return;
   if (!tone_is_idle(tp)) return;
@@ -206,10 +223,20 @@ void update_calibrate_song(TonePlayer* tp) {
   s_cal_song_index++;
 }
 
+void update_calibrate_song() {
+  if (s_default_tp == nullptr) return;
+  update_calibrate_song(s_default_tp);
+}
+
 void balance_zero_cross_tweet(TonePlayer* tp) {
   tone_start_volume(tp,
                     ZERO_CROSS_BEEP_HZ,
                     ZERO_CROSS_BEEP_MS,
                     ZERO_CROSS_BEEP_GAP_MS,
                     ZERO_CROSS_BEEP_VOLUME_PCT);
+}
+
+void balance_zero_cross_tweet() {
+  if (s_default_tp == nullptr) return;
+  balance_zero_cross_tweet(s_default_tp);
 }
