@@ -87,6 +87,7 @@ struct BalanceTelemetrySample {
 void telemetry_link_init(HardwareSerial &serial_port, uint32_t baud);
 void telemetry_publish_balance_tick(const BalanceTelemetrySample &sample);
 void telemetry_uart_pump();
+bool telemetry_pop_next_packet(TelemetryPacket *out);
 bool telemetry_has_pending();
 uint32_t telemetry_pending_packets();
 uint32_t telemetry_pending_bytes();

@@ -5,13 +5,17 @@
 
 namespace {
 
-// 1024 * 64 B = 65536 B => about 5.12 s backlog at 200 Hz FAST telemetry.
-static constexpr uint16_t FAST_QUEUE_SIZE = 1024u;
+// Ring uses one slot as the empty/full discriminator, so use 5001 capacity
+// to hold a full 5000-packet burst test without dropping one.
+static constexpr uint16_t FAST_QUEUE_SIZE = 5001u;
 static constexpr uint16_t EVENT_QUEUE_SIZE = 64u;
-static constexpr uint8_t FAST_DECIMATE = 5u; // 1 kHz control -> 200 Hz fast telemetry.
+static constexpr uint8_t FAST_DECIMATE = 1u;
+static constexpr bool EVENT_LOGGING_ENABLED = false;
+static constexpr uint16_t EVENT_STATUS_COMPARE_MASK =
+    (uint16_t)~(uint16_t)(TELEMETRY_STATUS_TX_DUE);
 
 struct PacketQueue {
-  TelemetryPacket buf[FAST_QUEUE_SIZE];
+  TelemetryPacket *buf = nullptr;
   volatile uint16_t head = 0u;
   volatile uint16_t tail = 0u;
   uint16_t capacity = FAST_QUEUE_SIZE;
@@ -26,6 +30,7 @@ struct EventQueue {
 
 static PacketQueue g_fast_q;
 static EventQueue g_event_q;
+DMAMEM static TelemetryPacket g_fast_storage[FAST_QUEUE_SIZE];
 static HardwareSerial *g_telem_serial = nullptr;
 static uint32_t g_seq_counter = 0u;
 static uint8_t g_fast_decimate_counter = 0u;
@@ -79,6 +84,7 @@ static void fast_q_push_drop_oldest(const TelemetryPacket &pkt) {
   if (fast_q_is_full()) {
     fast_q_drop_oldest();
   }
+  if (g_fast_q.buf == nullptr) return;
   g_fast_q.buf[g_fast_q.head] = pkt;
   g_fast_q.head = next_index(g_fast_q.head, g_fast_q.capacity);
 }
@@ -103,7 +109,7 @@ static bool event_q_pop(TelemetryPacket *out) {
 }
 
 static bool fast_q_pop(TelemetryPacket *out) {
-  if (fast_q_is_empty() || out == nullptr) return false;
+  if (g_fast_q.buf == nullptr || fast_q_is_empty() || out == nullptr) return false;
   *out = g_fast_q.buf[g_fast_q.tail];
   g_fast_q.tail = next_index(g_fast_q.tail, g_fast_q.capacity);
   return true;
@@ -165,10 +171,11 @@ static uint32_t compose_state_bits(const BalanceTelemetrySample &s) {
 }
 
 static void queue_event_if_needed(const BalanceTelemetrySample &s) {
-  const bool status_changed = (s.status_flags != g_last_status_flags);
+  const uint16_t filtered_status = (uint16_t)(s.status_flags & EVENT_STATUS_COMPARE_MASK);
+  const bool status_changed = (filtered_status != g_last_status_flags);
   const bool state_changed = (s.state_bits != g_last_state_bits);
   const bool has_event = (s.event_code != TELEMETRY_EVENT_NONE);
-  g_last_status_flags = s.status_flags;
+  g_last_status_flags = filtered_status;
   g_last_state_bits = s.state_bits;
   if (!status_changed && !state_changed && !has_event) return;
 
@@ -184,6 +191,7 @@ static void queue_event_if_needed(const BalanceTelemetrySample &s) {
 void telemetry_link_init(HardwareSerial &serial_port, uint32_t baud) {
   g_telem_serial = &serial_port;
   g_telem_serial->begin(baud);
+  g_fast_q.buf = g_fast_storage;
   g_fast_q.head = g_fast_q.tail = 0u;
   g_event_q.head = g_event_q.tail = 0u;
   g_seq_counter = 0u;
@@ -195,7 +203,10 @@ void telemetry_link_init(HardwareSerial &serial_port, uint32_t baud) {
 }
 
 void telemetry_publish_balance_tick(const BalanceTelemetrySample &sample) {
-  queue_event_if_needed(sample);
+  // EVENT telemetry is intentionally disabled while validating FAST continuity.
+  if (EVENT_LOGGING_ENABLED) {
+    queue_event_if_needed(sample);
+  }
 
   g_fast_decimate_counter++;
   if (g_fast_decimate_counter < FAST_DECIMATE) return;
@@ -211,31 +222,41 @@ void telemetry_publish_balance_tick(const BalanceTelemetrySample &sample) {
 void telemetry_uart_pump() {
   if (g_telem_serial == nullptr) return;
 
-  if (!g_tx_active) {
-    if (event_q_pop(&g_tx_packet) || fast_q_pop(&g_tx_packet)) {
-      g_tx_active = true;
+  const uint16_t total = (uint16_t)sizeof(TelemetryPacket);
+  while (true) {
+    if (!g_tx_active) {
+      if (event_q_pop(&g_tx_packet) || fast_q_pop(&g_tx_packet)) {
+        g_tx_active = true;
+        g_tx_offset = 0u;
+      } else {
+        return;
+      }
+    }
+
+    const int writable = g_telem_serial->availableForWrite();
+    if (writable <= 0) return;
+
+    const uint8_t *raw = reinterpret_cast<const uint8_t*>(&g_tx_packet);
+    const uint16_t remaining = (uint16_t)(total - g_tx_offset);
+    uint16_t chunk = (uint16_t)writable;
+    if (chunk > remaining) chunk = remaining;
+    if (chunk == 0u) return;
+
+    const size_t written = g_telem_serial->write(raw + g_tx_offset, chunk);
+    if (written == 0u) return;
+
+    g_tx_offset = (uint16_t)(g_tx_offset + (uint16_t)written);
+    if (g_tx_offset >= total) {
+      g_tx_active = false;
       g_tx_offset = 0u;
-    } else {
-      return;
     }
   }
+}
 
-  const uint8_t *raw = reinterpret_cast<const uint8_t*>(&g_tx_packet);
-  const uint16_t total = (uint16_t)sizeof(TelemetryPacket);
-  const uint16_t remaining = (uint16_t)(total - g_tx_offset);
-  const int writable = g_telem_serial->availableForWrite();
-  if (writable <= 0) return;
-
-  uint16_t chunk = (uint16_t)writable;
-  if (chunk > remaining) chunk = remaining;
-  if (chunk == 0u) return;
-
-  const size_t written = g_telem_serial->write(raw + g_tx_offset, chunk);
-  g_tx_offset = (uint16_t)(g_tx_offset + (uint16_t)written);
-  if (g_tx_offset >= total) {
-    g_tx_active = false;
-    g_tx_offset = 0u;
-  }
+bool telemetry_pop_next_packet(TelemetryPacket *out) {
+  if (out == nullptr) return false;
+  if (event_q_pop(out)) return true;
+  return fast_q_pop(out);
 }
 
 bool telemetry_has_pending() {

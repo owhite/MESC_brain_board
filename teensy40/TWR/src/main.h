@@ -56,6 +56,18 @@
 #define TELEMETRY_LINK_BAUD 921600u
 #endif
 
+// SerialTransfer-based telemetry bridge mode (Teensy -> ESP32 over Serial4).
+// Uses TelemetryPacket as the shared packed wire struct.
+#ifndef TELEMETRY_SERIALTRANSFER_TX_ENABLE
+#define TELEMETRY_SERIALTRANSFER_TX_ENABLE 1
+#endif
+#ifndef TELEMETRY_SERIALTRANSFER_BAUD
+#define TELEMETRY_SERIALTRANSFER_BAUD 2000000u
+#endif
+#ifndef TELEMETRY_SERIALTRANSFER_CONTINUOUS_TX_ENABLE
+#define TELEMETRY_SERIALTRANSFER_CONTINUOUS_TX_ENABLE 0
+#endif
+
 // Global compile-time safety gate for wheel command transmission.
 // 0 = never send IQREQ torque frames from Teensy
 // 1 = allow IQREQ torque TX (normal behavior)

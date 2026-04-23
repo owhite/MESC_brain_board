@@ -1,5 +1,8 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <SerialTransfer.h>
+#include <SPI.h>
+#include <Wire.h>
 #include <stdarg.h>
 
 // ======== User config ========
@@ -13,7 +16,8 @@ static const uint16_t TCP_PORT = 9000;
 static const int UART_NUM = 2;
 static const int UART_RX_PIN = 16;               // ESP32 RX  (connect to Teensy Serial4 TX / pin 17)
 static const int UART_TX_PIN = 17;               // ESP32 TX  (connect to Teensy Serial4 RX / pin 16)
-static const uint32_t UART_BAUD = 921600;
+static const uint32_t UART_BAUD = 2000000;
+static const bool SERIALTRANSFER_RX_MONITOR_MODE = true;
 
 // Buffer sizing
 static const size_t BUF_SZ = 4096;
@@ -23,6 +27,28 @@ static const bool LOSSLESS_MODE = true;
 
 // Debug serial (USB) baud
 static const uint32_t DEBUG_BAUD = 115200;
+
+static constexpr uint16_t TELEMETRY_PACKET_FOOTER = 0xDEADu;
+static constexpr size_t TELEMETRY_PAYLOAD_FLOATS = 11u;
+
+struct __attribute__((packed)) TelemetryPacket {
+  uint32_t seq;
+  uint32_t timestamp_us;
+  uint16_t type;
+  uint16_t status_flags;
+  float payload[TELEMETRY_PAYLOAD_FLOATS];
+  uint32_t state_bits;
+  uint16_t checksum;
+  uint16_t footer;
+};
+
+static_assert(sizeof(TelemetryPacket) == 64u, "TelemetryPacket must be 64 bytes");
+
+struct __attribute__((packed)) TelemetryAck {
+  uint32_t seq;
+  uint16_t code;
+  uint16_t reserved;
+};
 
 static bool lastTcpConnected = false;
 
@@ -46,6 +72,39 @@ static uint8_t tcpBuf[BUF_SZ];
 WiFiServer server(TCP_PORT);
 WiFiClient client;
 HardwareSerial TeensyUart(UART_NUM);
+SerialTransfer gTransfer;
+static bool g_have_last_seq = false;
+static uint32_t g_last_seq = 0u;
+static uint32_t g_drop_estimate = 0u;
+static uint32_t g_rx_packet_count = 0u;
+static uint32_t g_tcp_forward_drop_packets = 0u;
+static uint32_t g_ack_tx_count = 0u;
+static uint32_t g_last_rx_timestamp_us = 0u;
+static uint32_t g_last_rx_ms = 0u;
+static float g_last_bus_voltage = NAN;
+static int8_t g_last_transfer_status = 0;
+static void flushPendingToTcp();
+
+static bool enqueueTcpPending(const uint8_t *data, size_t len)
+{
+  if (data == nullptr || len == 0u) return true;
+  if (len > BUF_SZ) return false;
+
+  if (tcpPendingOff > 0u && tcpPendingOff < tcpPendingLen) {
+    const size_t remain = tcpPendingLen - tcpPendingOff;
+    memmove(tcpPending, tcpPending + tcpPendingOff, remain);
+    tcpPendingLen = remain;
+    tcpPendingOff = 0u;
+  } else if (tcpPendingOff >= tcpPendingLen) {
+    tcpPendingLen = 0u;
+    tcpPendingOff = 0u;
+  }
+
+  if ((tcpPendingLen + len) > BUF_SZ) return false;
+  memcpy(tcpPending + tcpPendingLen, data, len);
+  tcpPendingLen += len;
+  return true;
+}
 
 uint32_t lastBlinkMs = 0;
 bool ledState = false;
@@ -199,6 +258,107 @@ static void wifiConnect()
   bannerPrintf("WiFi connected. IP: %s", WiFi.localIP().toString().c_str());
 }
 
+static void serialTransferRxTick()
+{
+  flushPendingToTcp();
+
+  // Drain multiple packets per loop pass to avoid UART/parser backlog.
+  static constexpr int MAX_PACKETS_PER_TICK = 32;
+  for (int i = 0; i < MAX_PACKETS_PER_TICK; ++i) {
+    if (!gTransfer.available()) {
+      break;
+    }
+
+    TelemetryPacket pkt = {};
+    uint16_t rec_size = 0u;
+    rec_size = gTransfer.rxObj(pkt, rec_size);
+    if (rec_size != sizeof(TelemetryPacket)) {
+      continue;
+    }
+
+    if (pkt.footer != TELEMETRY_PACKET_FOOTER) {
+      continue;
+    }
+
+    g_rx_packet_count++;
+    if (g_have_last_seq && pkt.seq > (g_last_seq + 1u)) {
+      g_drop_estimate += (pkt.seq - g_last_seq - 1u);
+    }
+    g_have_last_seq = true;
+    g_last_seq = pkt.seq;
+    g_last_rx_timestamp_us = pkt.timestamp_us;
+    g_last_rx_ms = millis();
+
+    // Stop-and-wait flow control: ACK immediately after ingest/validation.
+    TelemetryAck ack = {};
+    ack.seq = pkt.seq;
+    ack.code = 1u;
+    gTransfer.sendDatum(ack);
+    g_ack_tx_count++;
+
+    const float bus_voltage = pkt.payload[0];
+    g_last_bus_voltage = bus_voltage;
+    if (client && client.connected()) {
+      const uint8_t *raw = reinterpret_cast<const uint8_t*>(&pkt);
+      const size_t pkt_size = sizeof(TelemetryPacket);
+
+      if (tcpPendingLen != 0u) {
+        if (!enqueueTcpPending(raw, pkt_size)) {
+          g_tcp_forward_drop_packets++;
+        }
+      } else {
+        const int written = client.write(raw, pkt_size);
+        if (written == (int)pkt_size) {
+          tcpTxBytes += (uint32_t)pkt_size;
+        } else if (written > 0) {
+          tcpTxBytes += (uint32_t)written;
+          if (!enqueueTcpPending(raw + (size_t)written, pkt_size - (size_t)written)) {
+            g_tcp_forward_drop_packets++;
+          }
+        } else {
+          if (!enqueueTcpPending(raw, pkt_size)) {
+            g_tcp_forward_drop_packets++;
+          }
+        }
+      }
+    }
+  }
+
+  if (gTransfer.status < 0) {
+    g_last_transfer_status = gTransfer.status;
+  }
+}
+
+static void serialTransferHudTick()
+{
+  const uint32_t now = millis();
+  if (now - lastStatsMs < 200) return;
+  lastStatsMs = now;
+
+  const int afw = (client && client.connected()) ? client.availableForWrite() : -1;
+  const uint32_t rx_age_ms = (g_last_rx_ms > 0u) ? (now - g_last_rx_ms) : 0u;
+  const size_t pend = (tcpPendingLen >= tcpPendingOff) ? (tcpPendingLen - tcpPendingOff) : 0u;
+
+  ansiSaveCursor();
+  int r = 2;
+
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("[STATS] up=%lus", (now - bootMs) / 1000);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("WiFi=%s", (WiFi.status() == WL_CONNECTED) ? "OK" : "DOWN");
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("TCP=%s", (client && client.connected()) ? "CONNECTED" : "none");
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("AFW=%d PEND=%u", afw, (unsigned)pend);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("RX_PKT=%lu ACK_TX=%lu", (unsigned long)g_rx_packet_count, (unsigned long)g_ack_tx_count);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("SEQ_LAST=%lu", (unsigned long)g_last_seq);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("DROP_EST=%lu", (unsigned long)g_drop_estimate);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("TCP_TX=%lu TCP_FWD_DROP=%lu", (unsigned long)tcpTxBytes, (unsigned long)g_tcp_forward_drop_packets);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("BUS_V=%.3fV", g_last_bus_voltage);
+  ansiGotoRC(r++, 1); Serial.printf("\r"); ansiClearLine(); Serial.printf("RX_AGE=%lums TS_US=%lu ST=%d",
+                                                                           (unsigned long)rx_age_ms,
+                                                                           (unsigned long)g_last_rx_timestamp_us,
+                                                                           (int)g_last_transfer_status);
+
+  ansiRestoreCursor();
+}
+
 static void mdnsStart()
 {
   MDNS.end();
@@ -251,7 +411,7 @@ static void acceptClientIfNeeded()
   WiFiClient newClient = server.available();
   if (newClient) {
     client = newClient;
-    client.setNoDelay(false);
+    client.setNoDelay(true);
 
     tcpPendingLen = 0;
     tcpPendingOff = 0;
@@ -402,10 +562,35 @@ static void statsTick()
 
 void setup()
 {
+  if (SERIALTRANSFER_RX_MONITOR_MODE) {
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.begin(DEBUG_BAUD);
+    delay(300);
+    bootMs = millis();
+    hudInit();
+    bannerPrintf("SerialTransfer RX monitor booting...");
+
+    // Must be configured before begin() to absorb UART bursts.
+    TeensyUart.setRxBufferSize(4096);
+    TeensyUart.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+    // Disable SerialTransfer debug printing; surface status via HUD instead.
+    gTransfer.begin(TeensyUart, false);
+    g_last_bus_voltage = NAN;
+
+    wifiConnect();
+    mdnsStart();
+    server.begin();
+    bannerPrintf("SerialTransfer RX + TCP forwarding on port %u  (%s.local)", TCP_PORT, MDNS_NAME);
+    return;
+  }
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
   Serial.begin(DEBUG_BAUD);
+  Serial.setRxBufferSize(4096);
   delay(300);
 
   bootMs = millis();
@@ -434,6 +619,22 @@ void setup()
 
 void loop()
 {
+  if (SERIALTRANSFER_RX_MONITOR_MODE) {
+    ledTick();
+    if (WiFi.status() != WL_CONNECTED) {
+      bannerPrintf("WiFi disconnected; reconnecting...");
+      wifiConnect();
+      mdnsStart();
+      server.begin();
+      bannerPrintf("SerialTransfer RX + TCP forwarding on port %u  (%s.local)", TCP_PORT, MDNS_NAME);
+    }
+    acceptClientIfNeeded();
+    serialTransferRxTick();
+    serialTransferHudTick();
+    yield();
+    return;
+  }
+
  // Serial.println("alive");
 
   ledTick();
