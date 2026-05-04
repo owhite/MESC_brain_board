@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../../ESP32/wifi_repeater"
+		}
+	],
+	"settings": {
+		"platformio-ide.useBuiltinPIOCore": false,
+		"platformio-ide.customPATH": "/Users/owhite/.platformio/penv/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	}
+}

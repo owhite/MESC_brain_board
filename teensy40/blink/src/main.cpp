@@ -9,7 +9,6 @@ void setup() {
   pinMode(LED_PIN1, OUTPUT);
   pinMode(LED_PIN2, OUTPUT);
   pinMode(LED_PIN3, OUTPUT);
-
 }
 
 void loop() {
