@@ -17,11 +17,11 @@ void loop() {
   digitalWriteFast(LED_PIN1, HIGH);
   digitalWriteFast(LED_PIN2, HIGH);
   digitalWriteFast(LED_PIN3, HIGH);
-  delay(100);
+  delay(80);
   digitalWriteFast(LED_PIN1, LOW);
   digitalWriteFast(LED_PIN2, LOW);
   digitalWriteFast(LED_PIN3, LOW);
-  delay(100);
+  delay(80);
 }
 
 

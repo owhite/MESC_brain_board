@@ -1,0 +1,17 @@
+[Unit]
+Description=Headless Teensy OTA Bridge Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__BRIDGE_USER__
+Group=__BRIDGE_USER__
+WorkingDirectory=__BRIDGE_HOME__
+Environment=TEENSY_DROP_DIR=__TEENSY_DROP_DIR__
+ExecStart=/usr/bin/python3 __BRIDGE_HOME__/teensy-bridge/bridge.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

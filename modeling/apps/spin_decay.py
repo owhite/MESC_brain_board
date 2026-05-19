@@ -5,13 +5,15 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import csv
+import time
 
 """
 Spin-down capture + decay fit (single sender)
 
 - Assumes baud rate = 115200
 - Uses ONLY sender 11
-- Assumes logging rate = 500 Hz (dt = 0.002 s)
+- Uses the Teensy-provided t_us timestamp when present
 - Wait until |vel| >= START_SPEED_RAD_S, then record until |vel| <= STOP_SPEED_RAD_S
 - Fits exponential: |ω(t)| ≈ ω0 * exp(-t/τ)
 - Calculates and displays:
@@ -30,14 +32,20 @@ Optional:
 SENDER_ID = 11
 BAUD = 115200
 
-LOG_HZ = 500.0
-DT = 1.0 / LOG_HZ
+FALLBACK_LOG_HZ = 500.0
+FALLBACK_DT = 1.0 / FALLBACK_LOG_HZ
 
-START_SPEED_RAD_S = 100.0
+START_SPEED_RAD_S = 80.0
 STOP_SPEED_RAD_S = 0.5
 OMEGA_MIN_FIT_RAD_S = 5.0  # exclude low-speed region (Coulomb / quantization)
 
 MAX_CAPTURE_SAMPLES = 2_000_000
+
+
+def open_optional_text_file(path, mode="w"):
+    if not path:
+        return None
+    return open(path, mode, encoding="utf-8", newline="")
 
 
 def safe_float(x, default=None):
@@ -168,61 +176,158 @@ def main():
         default=None,
         help="Flywheel inertia in kg*m^2. If provided, b = J/τ and c = J*k are reported.",
     )
+    parser.add_argument(
+        "--raw-capture",
+        action="store_true",
+        help="Show raw samples as points and print sample spacing/drop diagnostics.",
+    )
+    parser.add_argument(
+        "--raw-jsonl",
+        default=None,
+        help="Write every valid JSON serial line to this JSONL file with host receive time and accept/ignore reason.",
+    )
+    parser.add_argument(
+        "--sample-csv",
+        default=None,
+        help="Write accepted sender velocity samples used by the capture to this CSV file.",
+    )
     args = parser.parse_args()
 
     ser = serial.Serial(args.port, BAUD, timeout=1)
     print(f"Opened {args.port} at {BAUD} baud. Listening for sender {SENDER_ID}...")
-    print(f"Assumed logging rate: {LOG_HZ:.0f} Hz (dt={DT:.6f} s)")
+    print("Using incoming t_us timestamps when available.")
+    print(f"Fallback logging rate: {FALLBACK_LOG_HZ:.0f} Hz (dt={FALLBACK_DT:.6f} s)")
     print(f"START when |vel| >= {START_SPEED_RAD_S} rad/s")
     print(f"STOP  when |vel| <= {STOP_SPEED_RAD_S} rad/s\n")
+    if args.raw_capture:
+        print("Raw capture diagnostics enabled.")
+    if args.raw_jsonl:
+        print(f"Raw JSONL log: {args.raw_jsonl}")
+    if args.sample_csv:
+        print(f"Accepted sample CSV: {args.sample_csv}")
 
     omega = []
     t_s = []
 
     started = False
     sample_idx = 0
+    t0_us = None
+    raw_json_count = 0
+    ignored_json_count = 0
+    ignored_non_json_count = 0
+    accepted_sender_count = 0
 
-    while True:
-        line = ser.readline().decode(errors="ignore").strip()
-        if not line:
-            continue
+    raw_jsonl_f = open_optional_text_file(args.raw_jsonl)
+    sample_csv_f = open_optional_text_file(args.sample_csv)
+    sample_writer = None
+    if sample_csv_f is not None:
+        sample_writer = csv.writer(sample_csv_f)
+        sample_writer.writerow(["capture_index", "host_t_s", "t_us", "t_s", "sender", "pos", "vel"])
 
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if msg.get("sender", None) != SENDER_ID:
-            continue
-
-        v = safe_float(msg.get("vel", None))
-        if v is None:
-            continue
-
-        if not started:
-            if abs(v) >= START_SPEED_RAD_S:
-                started = True
-                print(f"✅ START capture at sample {sample_idx} (|vel|={abs(v):.2f} rad/s)")
-            else:
+    try:
+        while True:
+            line = ser.readline().decode(errors="ignore").strip()
+            host_now_s = time.monotonic()
+            if not line:
                 continue
 
-        omega.append(v)
-        t_s.append(sample_idx * DT)
-        sample_idx += 1
+            try:
+                msg = json.loads(line)
+                raw_json_count += 1
+            except json.JSONDecodeError:
+                ignored_non_json_count += 1
+                continue
 
-        if sample_idx >= MAX_CAPTURE_SAMPLES:
-            print("⚠️ Reached MAX_CAPTURE_SAMPLES safety cap. Stopping.")
-            break
+            ignore_reason = None
+            if msg.get("sender", None) != SENDER_ID:
+                ignore_reason = "sender_mismatch_or_missing"
 
-        if abs(v) <= STOP_SPEED_RAD_S:
-            print(f"✅ STOP  capture at sample {sample_idx} (|vel|={abs(v):.2f} rad/s)")
-            break
+            v = safe_float(msg.get("vel", None))
+            if ignore_reason is None and v is None:
+                ignore_reason = "missing_vel"
 
-    ser.close()
+            t_us = safe_float(msg.get("t_us", None))
+            p = safe_float(msg.get("pos", None))
+
+            if raw_jsonl_f is not None:
+                raw_jsonl_f.write(json.dumps({
+                    "host_t_s": host_now_s,
+                    "accepted_for_sender": ignore_reason is None,
+                    "ignore_reason": ignore_reason,
+                    "msg": msg,
+                }, separators=(",", ":")) + "\n")
+
+            if ignore_reason is not None:
+                ignored_json_count += 1
+                continue
+
+            accepted_sender_count += 1
+
+            if not started:
+                if abs(v) >= START_SPEED_RAD_S:
+                    started = True
+                    t0_us = t_us
+                    print(f"✅ START capture at sample {sample_idx} (|vel|={abs(v):.2f} rad/s)")
+                else:
+                    continue
+
+            if t_us is not None and t0_us is not None:
+                sample_t_s = (t_us - t0_us) * 1.0e-6
+            else:
+                sample_t_s = sample_idx * FALLBACK_DT
+
+            omega.append(v)
+            t_s.append(sample_t_s)
+            if sample_writer is not None:
+                sample_writer.writerow([sample_idx, host_now_s, t_us, sample_t_s, SENDER_ID, p, v])
+            sample_idx += 1
+
+            if sample_idx >= MAX_CAPTURE_SAMPLES:
+                print("⚠️ Reached MAX_CAPTURE_SAMPLES safety cap. Stopping.")
+                break
+
+            if abs(v) <= STOP_SPEED_RAD_S:
+                print(f"✅ STOP  capture at sample {sample_idx} (|vel|={abs(v):.2f} rad/s)")
+                break
+    finally:
+        ser.close()
+        if raw_jsonl_f is not None:
+            raw_jsonl_f.close()
+        if sample_csv_f is not None:
+            sample_csv_f.close()
+
+    print(
+        "Serial JSON diagnostics: "
+        f"json={raw_json_count}, accepted_sender={accepted_sender_count}, "
+        f"ignored_json={ignored_json_count}, ignored_non_json={ignored_non_json_count}"
+    )
 
     if len(omega) < 100:
         print("Not enough data captured to fit reliably. Try a longer spin-down.")
         return
+
+    if args.raw_capture:
+        t_arr_diag = np.asarray(t_s, dtype=float)
+        w_arr_diag = np.asarray(omega, dtype=float)
+        dt = np.diff(t_arr_diag)
+        dw = np.diff(w_arr_diag)
+        if len(dt) > 0:
+            print(
+                "Capture spacing: "
+                f"n={len(w_arr_diag)}, "
+                f"dt_mean={np.mean(dt) * 1000.0:.3f} ms, "
+                f"dt_min={np.min(dt) * 1000.0:.3f} ms, "
+                f"dt_p95={np.percentile(dt, 95) * 1000.0:.3f} ms, "
+                f"dt_max={np.max(dt) * 1000.0:.3f} ms"
+            )
+            nonmono_count = int(np.count_nonzero(dt <= 0))
+            if nonmono_count > 0:
+                print(f"⚠️ Non-monotonic or duplicate sample timestamps: {nonmono_count}")
+            print(
+                "Velocity step diagnostics: "
+                f"|dω|_p95={np.percentile(np.abs(dw), 95):.4g} rad/s, "
+                f"|dω|_max={np.max(np.abs(dw)):.4g} rad/s"
+            )
 
     # --- Exponential fit ---
     tau_s, slope, r2, fit_mask = fit_exponential_decay(t_s, omega, omega_min_fit=OMEGA_MIN_FIT_RAD_S)
@@ -244,6 +349,8 @@ def main():
     w_arr = np.asarray(omega, dtype=float)
 
     ax.plot(t_arr, w_arr, lw=1.5, label="ω(t)")
+    if args.raw_capture:
+        ax.plot(t_arr, w_arr, linestyle="none", marker=".", markersize=3.0, alpha=0.55, label="raw samples")
 
     # Optionally highlight fit region
     if fit_mask is not None and np.any(fit_mask):

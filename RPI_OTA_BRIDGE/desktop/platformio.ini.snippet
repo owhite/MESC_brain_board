@@ -1,0 +1,8 @@
+; Add to your PlatformIO project config
+[env:teensy40]
+platform = teensy
+board = teensy40
+framework = arduino
+
+upload_protocol = custom
+extra_scripts = post:upload_to_pi.py

@@ -96,6 +96,10 @@ Substitute in mass:
 - 𝐽 = 1/2 ⋅ 0.429 (0.12)² ≈ 0.00309 kg ⋅ m²
 - This J was used to convert the measured spin-down time constant b=J/τ
 - Run this command: `$ ./apps/spin_decay.py /dev/cu.usbmodem181813701 --J 0.00309`
+- For capture diagnostics, append: `--raw-capture --raw-jsonl spin_decay_raw.jsonl --sample-csv spin_decay_samples.csv`
+  - `--raw-capture`: plots raw sample points and prints sample-spacing/velocity-step diagnostics (helps spot jitter or dropouts).
+  - `--raw-jsonl spin_decay_raw.jsonl`: writes every parsed JSON line with host receive time and an accept/ignore reason (helps debug sender filtering and malformed lines).
+  - `--sample-csv spin_decay_samples.csv`: writes the accepted sender samples used for fitting (`capture_index`, `host_t_s`, `t_us`, `t_s`, `sender`, `pos`, `vel`) so you can post-analyze the fit window.
 
 **Result:**   
 <img src="PICS/graph1.png" alt="Plot result" width="600"/>
@@ -117,6 +121,23 @@ ChatG says this is exactly the right order of magnitude for:
 - Moderate windage
 - Open-circuit (not connected to ESC)
 
+## GB36-2 motor -- another spin down experiment
+Previous work was for a cubemars GL60. 
+
+Now testing a new motor: 
+
+` ./apps/spin_decay.py /dev/cu.usbmodem181813701 --J 0.000881 --raw-capture --raw-jsonl spin_decay_raw.jsonl --sample-csv spin_decay_samples.csv`
+
+- This is the rig I used: [LINK](PICS/rig2.png)
+- Primary platter: aluminum disk, D = 150 mm, thickness = 6.4 mm
+- Secondary platter: D = 58 mm, mass = 52 g
+- Assumed aluminum density for primary platter: ρ = 2700 kg/m³
+- Estimated inertia:
+- J1 (150 mm plate) ≈ 8.59e-4 kg·m²
+- J2 (58 mm, 52 g plate) ≈ 2.19e-5 kg·m²
+- J_total ≈ 8.81e-4 kg·m²
+
+RESULT: `b_Nm_s_per_rad = 0.00017`
 
 ## Review of TWR data
 
@@ -393,4 +414,23 @@ Help me produce:
 
 ---
 
-I will now describe my setup.
+-----
+
+Prompt complete, let's walk through an experiment:
+
+The specs of my motor are the following:
+- GB36-2 Gimbal 
+- KV30 
+- Configuration: 12N14P 
+- Weight 128g 
+- Internal resistance: 16.4 ohms
+
+chatgpt suggests a flywheel of the approximate weight:
+
+J ≈ 3×10−4 to 8×10−4 kgm2
+
+I am going to order 
+
+Use 3.2 mm aluminum for three platters.
+
+At 150 mm diameter, each platter is approximately, Mass: ~153 g
