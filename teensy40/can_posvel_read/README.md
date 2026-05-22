@@ -4,7 +4,7 @@
 
 ---
 
-### `src/main.cpp`: POSVEL reader with keepalive
+### `src/main.cpp`: POSVEL reader
 
 The active `src/main.cpp` sketch is a POSVEL receiver/diagnostic for the current two-bus Teensy 4.0 bench wiring.
 
@@ -15,17 +15,19 @@ Key behavior:
 - Reads extended MESC CAN traffic from both controllers.
 - Tracks `CAN_ID_POSVEL` (`0x2D0`) counts and latest position/velocity for nodes 11 and 12.
 - Emits a compact 1 Hz JSON summary rather than printing every POSVEL frame.
-- Sends zero-torque `CAN_ID_IQREQ` (`0x001`) to ESC node 11 at 10 Hz on both CAN buses.
+- Can optionally send zero-torque `CAN_ID_IQREQ` (`0x001`) to ESC node 11 on both CAN buses for sync/legacy testing.
 
-Why the zero-IQREQ keepalive exists:
+Why the zero-IQREQ keepalive existed:
 
-Current ESC firmware synchronizes POSVEL publication to incoming `CAN_ID_IQREQ` frames. Bench testing showed autonomous POSVEL can stop after about 25.56 seconds without periodic IQREQ traffic, likely because the ESC POSVEL scheduler uses `DWT_CYCCNT / 168` as a 32-bit microsecond timebase and that counter wraps at about 25.56 seconds on the F405. Incoming IQREQ frames re-anchor the scheduler, so a zero-torque IQREQ keepalive preserves the current low-dropout synchronized POSVEL behavior.
+Older ESC firmware synchronized POSVEL publication to incoming `CAN_ID_IQREQ` frames. Bench testing showed autonomous POSVEL could stop after about 25.56 seconds without periodic IQREQ traffic because the ESC POSVEL scheduler used `DWT_CYCCNT / 168` as a 32-bit microsecond timebase, and that raw cycle-derived timestamp wraps at about 25.56 seconds on the F405. Incoming IQREQ frames re-anchored the scheduler, so a zero-torque IQREQ keepalive preserved low-dropout synchronized POSVEL behavior.
 
-This sketch sends the keepalive on both CAN buses because TWR bench wiring routes ESC nodes across CAN1/CAN2; sending on only one bus can silently miss the target ESC.
+The ESC firmware has now been repaired: POSVEL scheduling uses a wrap-safe monotonic microsecond timebase while retaining the IQREQ-triggered sync/nudge path. A 60s `tx off` CAN test validated autonomous 500 Hz POSVEL from both ESCs across the old DWT wrap point with no missed, duplicate, or out-of-order POSVEL frames.
 
-Long-term firmware note:
+The keepalive in this sketch is therefore disabled by default. If it is re-enabled for sync experiments or for older ESC firmware, the sketch sends it on both CAN buses because TWR bench wiring routes ESC nodes across CAN1/CAN2; sending on only one bus can silently miss the target ESC.
 
-The preferred ESC-side fix is to keep the IQREQ-triggered sync/nudge behavior, but replace the autonomous POSVEL scheduler's raw DWT-derived `uint32_t` timebase with a wrap-safe monotonic time source. Before making that ESC firmware change, repeat CAN dropout testing for both autonomous POSVEL and IQREQ-synchronized POSVEL.
+Firmware status:
+
+The long-term ESC-side fix has been completed in `MESCinterface.c`: keep IQREQ-triggered sync/nudge behavior, but use a wrap-safe monotonic time source for autonomous POSVEL scheduling. Real POSVEL payloads have also been restored: slot0 is wrapped mechanical position in radians, and slot1 is velocity in rad/s.
 
 Useful summary fields:
 

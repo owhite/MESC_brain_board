@@ -2,20 +2,17 @@
 #include <FlexCAN_T4.h>
 
 /*
- * POSVEL reader / keepalive diagnostic.
+ * POSVEL reader / optional keepalive diagnostic.
  *
  * Important MESC behavior as tested on the current ESC firmware:
- * - The ESC can stop autonomous CAN_ID_POSVEL publication after about 25.56 s
- *   when no CAN_ID_IQREQ frames are received.
- * - Periodic zero-torque IQREQ frames are sufficient to keep the POSVEL path
- *   synchronized/alive in the current firmware.
+ * - The ESC POSVEL scheduler now uses a wrap-safe monotonic timebase, so
+ *   autonomous CAN_ID_POSVEL publication no longer needs zero-IQREQ keepalive
+ *   traffic to survive the old ~25.56 s F405 DWT cycle-counter wrap.
+ * - Incoming zero-torque IQREQ frames can still be sent for sync experiments
+ *   or older ESC firmware; the ESC keeps the IQREQ-triggered sync/nudge path.
  * - The TWR bench wiring uses both Teensy CAN controllers, with node routing
  *   that may place node 11 on CAN2. To avoid silent wrong-bus tests, this
- *   reader listens on CAN1 and CAN2 and sends the zero-IQREQ keepalive on both.
- *
- * This is intentionally a receiver/diagnostic workaround, not the preferred
- * long-term ESC behavior. The ESC should eventually use a wrap-safe monotonic
- * POSVEL scheduler timebase while retaining IQREQ-triggered sync.
+ *   reader listens on CAN1 and CAN2 and sends optional IQREQ traffic on both.
  */
 FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> Can1;
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can2;
@@ -42,8 +39,8 @@ volatile uint32_t rx_drop_count = 0;
 
 static const uint32_t POSVEL_PRINT_PERIOD_US = 10000;  // 100 Hz total
 static const uint32_t SUMMARY_PRINT_PERIOD_US = 1000000;  // 1 Hz
-static const uint32_t IQREQ_HEARTBEAT_PERIOD_US = 2000000;  // 0.5 Hz zero torque keepalive (every 2 s)
-static const bool IQREQ_HEARTBEAT_ENABLE = true;
+static const uint32_t IQREQ_HEARTBEAT_PERIOD_US = 2000000;  // 0.5 Hz optional zero-torque sync pulse
+static const bool IQREQ_HEARTBEAT_ENABLE = false;
 static const bool POSVEL_VALUE_PRINT_ENABLE = true;
 static const bool POSVEL_TIMER_PRINT_ENABLE = false;
 static const bool SUMMARY_PRINT_ENABLE = false;

@@ -12,7 +12,7 @@
 ## FLIPSKY 6215 KV170
 - set par_ld 0.000015
 - set par_lq 0.000022
-- set par_pp 14      
+- set par_pp 14
 - set par_r  0.070000
 
 ## GL80 KV30
@@ -20,6 +20,20 @@
 - set par_lq 0.00082
 - set par_pp 21
 - set par_r  1.13
+b ≈ 0.00138 N⋅m⋅s/rad
+
+## GB36-2
+- set par_ld 0.0049
+- set par_lq 0.0088 
+- set par_r 8.2
+- set par_pp 7
+b ≈ 0.00017 N·m·s/rad
+
+## FLIPSKY_6382_190KV
+- set par_ld 0.000015
+- set par_lq 0.000022
+- set par_r  0.0160f
+- set par_pp 7
 
 ## QS165 V2
 - set par_ld 0.000042

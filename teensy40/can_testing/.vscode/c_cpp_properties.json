@@ -8,13 +8,13 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "/Users/owhite/balancing-robot-notes/teensy40/TWR/include",
-                "/Users/owhite/balancing-robot-notes/teensy40/TWR/src",
+                "/Users/owhite/balancing-robot-notes/teensy40/can_testing/include",
+                "/Users/owhite/balancing-robot-notes/teensy40/can_testing/src",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/Wire",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/Wire/utility",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/SPI",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/FlexCAN_T4",
-                "/Users/owhite/balancing-robot-notes/teensy40/TWR/.pio/libdeps/teensy40/ArduinoJson/src",
+                "/Users/owhite/balancing-robot-notes/teensy40/can_testing/.pio/libdeps/teensy40/ArduinoJson/src",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/cores/teensy4",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/ADC",
                 "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/AccelStepper/src",
@@ -116,13 +116,13 @@
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "/Users/owhite/balancing-robot-notes/teensy40/TWR/include",
-                    "/Users/owhite/balancing-robot-notes/teensy40/TWR/src",
+                    "/Users/owhite/balancing-robot-notes/teensy40/can_testing/include",
+                    "/Users/owhite/balancing-robot-notes/teensy40/can_testing/src",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/Wire",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/Wire/utility",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/SPI",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/FlexCAN_T4",
-                    "/Users/owhite/balancing-robot-notes/teensy40/TWR/.pio/libdeps/teensy40/ArduinoJson/src",
+                    "/Users/owhite/balancing-robot-notes/teensy40/can_testing/.pio/libdeps/teensy40/ArduinoJson/src",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/cores/teensy4",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/ADC",
                     "/Users/owhite/.platformio/packages/framework-arduinoteensy/libraries/AccelStepper/src",

@@ -50,12 +50,20 @@ int ICM42688::begin() {
 	reset();
 
 	// check the WHO AM I byte
-	if (whoAmI() != WHO_AM_I) {
+	const uint8_t who_am_i = whoAmI();
+	if (who_am_i != WHO_AM_I) {
+		Serial.printf("{\"cmd\":\"IMU_DIAG\",\"step\":\"whoAmI\",\"read\":\"0x%02X\",\"expected\":\"0x%02X\"}\r\n",
+		              who_am_i,
+		              WHO_AM_I);
 		return -3;
 	}
 
 	// turn on accel and gyro in Low Noise (LN) Mode
 	if (writeRegister(UB0_REG_PWR_MGMT0, 0x0F) < 0) {
+		uint8_t pwr_mgmt0 = 0;
+		(void)readRegisters(UB0_REG_PWR_MGMT0, 1, &pwr_mgmt0);
+		Serial.printf("{\"cmd\":\"IMU_DIAG\",\"step\":\"PWR_MGMT0\",\"read\":\"0x%02X\",\"expected\":\"0x0F\"}\r\n",
+		              pwr_mgmt0);
 		return -4;
 	}
 
@@ -696,7 +704,7 @@ void ICM42688::reset() {
 	writeRegister(UB0_REG_DEVICE_CONFIG, 0x01);
 
 	// wait for ICM42688 to come back up
-	delay(1);
+	delay(10);
 }
 
 /* gets the ICM42688 WHO_AM_I register value */
