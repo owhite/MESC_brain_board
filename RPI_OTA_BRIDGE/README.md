@@ -1,11 +1,35 @@
-
-# PROMPT FOR CHATGPT:
-This codebase was created from the prompt in [PROMPT.md](PROMPT.md).
-
-## Headless Teensy OTA Bridge (Pi Zero 2 W)
+# Headless Teensy OTA Bridge (Pi Zero 2 W)
 
 Reference commit: `89e9f187`
 Date: 2026-05-05
+This codebase was created from the prompt in [PROMPT.md](PROMPT.md).
+
+## To invoke upload
+
+Documentation update reference commit: `0990f17e`
+
+From your PlatformIO project directory (example: `teensy40/blink`):
+
+```bash
+pio run -t bridge_send
+```
+
+Optional help command:
+
+```bash
+pio run -t bridge_help
+```
+
+Optional wrapper commands (if `pio_bridge.sh` is present in your PlatformIO project root):
+
+```bash
+./pio_bridge.sh --bridge_help
+./pio_bridge.sh --bridge_send
+```
+
+**NOTE:** some times you have to press the button on the teensy, but usually just for the first upload of the session. 
+
+## Construction notes
 
 This workspace implements your spec for a headless Raspberry Pi OTA bridge:
 
@@ -136,36 +160,3 @@ On upload:
 	- Cause: trigger is event-based (`on_closed`), not presence-based.
 	- Fix: copy/write a new `.hex` file into the drop directory; stale files do not retrigger.
 
-## Phase 2 Roadmap
-
-Documentation update reference commit: `89e9f187`
-
-### Scope
-
-Phase 2 focuses on operational hardening and faster recovery in unattended deployments.
-
-### Planned Enhancements
-
-1. Upload Retry and Timeout Policy
-	- Add bounded retry logic for transient flash failures.
-	- Add explicit timeout handling and deterministic exit codes.
-	- Surface retry count and timeout reason in `last_upload_status.log`.
-
-2. Health and Diagnostics Surface
-	- Add a lightweight health command/script to summarize:
-	  - systemd service state
-	  - last upload result and timestamp
-	  - drop/processed directory status
-	- Add a compact one-shot diagnostics command for support handoff.
-
-3. One-Command Bootstrap
-	- Add a single setup entry point to provision loader, udev rules, service files, and dependencies.
-	- Ensure custom username compatibility remains first-class.
-	- Include post-install verification checks with pass/fail output.
-
-### Acceptance Criteria
-
-1. A failed upload returns a clear nonzero code with reason labels (timeout, usb_unavailable, loader_error).
-2. Automatic retries are bounded and logged; no infinite retry loops.
-3. One command from a fresh Pi reaches an active bridge service and passing verification output.
-4. Health command gives enough context to diagnose the top known failure modes in under 60 seconds.

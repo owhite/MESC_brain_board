@@ -33,6 +33,7 @@ b ≈ 0.00017 N·m·s/rad
 - set par_ld 0.000015
 - set par_lq 0.000022
 - set par_r  0.0160f
+- set par_r  0.070000 ???
 - set par_pp 7
 
 ## QS165 V2

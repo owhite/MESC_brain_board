@@ -23,7 +23,7 @@ void loop() {
   digitalWriteFast(LED_PIN1, LOW);
   digitalWriteFast(LED_PIN2, LOW);
   digitalWriteFast(LED_PIN3, LOW);
-  delay(speed);
+  delay(speed); 
 }
 
 
