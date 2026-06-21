@@ -1,0 +1,21 @@
+[Unit]
+Description=Teensy USB Serial Listener Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__BRIDGE_USER__
+Group=__BRIDGE_USER__
+WorkingDirectory=__BRIDGE_HOME__
+Environment=TEENSY_RUN_BASE=__TEENSY_RUN_BASE__
+Environment=TEENSY_RUN_ID_FILE=__TEENSY_RUN_BASE__/current_run_id
+Environment=SERIAL_GLOB=/dev/ttyACM*
+Environment=SERIAL_BAUD=115200
+Environment=RUN_TIMEOUT_SEC=120
+ExecStart=/usr/bin/python3 __BRIDGE_HOME__/teensy-listener/serial_listener.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

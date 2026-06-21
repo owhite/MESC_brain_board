@@ -1,0 +1,14 @@
+{
+  "bytes": 1176,
+  "ended_utc": "2026-06-21T17:08:21.971634+00:00",
+  "error": "Run timed out waiting for RUN_DONE marker",
+  "parse_errors": 294,
+  "reconnects": 1,
+  "records": 294,
+  "run_id": "20260621_130618_664694",
+  "serial_baud": 115200,
+  "serial_device": "/dev/ttyACM0",
+  "started_utc": "2026-06-21T17:06:21.866731+00:00",
+  "state": "timed_out",
+  "updated_utc": "2026-06-21T17:08:21.971634+00:00"
+}

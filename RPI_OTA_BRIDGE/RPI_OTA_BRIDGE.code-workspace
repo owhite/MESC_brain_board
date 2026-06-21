@@ -5,6 +5,17 @@
 		},
 		{
 			"path": "../teensy40/blink"
+		},
+		{
+			"path": "../teensy40/RPI_upload_download"
 		}
-	]
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"git remote": true,
+			"git add": true,
+			"git commit": true,
+			"git push": true
+		}
+	}
 }

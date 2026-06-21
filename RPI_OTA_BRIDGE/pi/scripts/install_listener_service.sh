@@ -25,30 +25,29 @@ if [[ -z "$BRIDGE_HOME" ]]; then
   exit 1
 fi
 
-TEENSY_DROP_DIR="$BRIDGE_HOME/teensy_drops"
+TEENSY_RUN_BASE="$BRIDGE_HOME/teensy_runs"
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  python3-watchdog \
-  openssh-client
+  python3-serial
 
-mkdir -p "$BRIDGE_HOME/teensy-bridge"
-mkdir -p "$TEENSY_DROP_DIR/processed"
-cp "$PROJECT_ROOT/bridge/bridge.py" "$BRIDGE_HOME/teensy-bridge/bridge.py"
-chmod +x "$BRIDGE_HOME/teensy-bridge/bridge.py"
+mkdir -p "$BRIDGE_HOME/teensy-listener"
+mkdir -p "$TEENSY_RUN_BASE"
+cp "$PROJECT_ROOT/listener/serial_listener.py" "$BRIDGE_HOME/teensy-listener/serial_listener.py"
+chmod +x "$BRIDGE_HOME/teensy-listener/serial_listener.py"
 
 SERVICE_TMP="$(mktemp)"
 sed \
   -e "s|__BRIDGE_USER__|$BRIDGE_USER|g" \
   -e "s|__BRIDGE_HOME__|$BRIDGE_HOME|g" \
-  -e "s|__TEENSY_DROP_DIR__|$TEENSY_DROP_DIR|g" \
-  "$PROJECT_ROOT/systemd/teensy-bridge.service" > "$SERVICE_TMP"
+  -e "s|__TEENSY_RUN_BASE__|$TEENSY_RUN_BASE|g" \
+  "$PROJECT_ROOT/systemd/teensy-listener.service" > "$SERVICE_TMP"
 
-sudo cp "$SERVICE_TMP" /etc/systemd/system/teensy-bridge.service
+sudo cp "$SERVICE_TMP" /etc/systemd/system/teensy-listener.service
 rm -f "$SERVICE_TMP"
 sudo systemctl daemon-reload
-sudo systemctl enable teensy-bridge.service
-sudo systemctl restart teensy-bridge.service
+sudo systemctl enable teensy-listener.service
+sudo systemctl restart teensy-listener.service
 
-echo "Bridge service installed and started."
-systemctl --no-pager --full status teensy-bridge.service | sed -n '1,20p'
+echo "Teensy listener service installed and started."
+systemctl --no-pager --full status teensy-listener.service | sed -n '1,20p'

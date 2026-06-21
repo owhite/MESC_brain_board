@@ -1,0 +1,7 @@
+{
+  "listener_started_utc": "2026-06-21T17:16:19.992966+00:00",
+  "run_id": "20260621_131618_d19539",
+  "serial_baud": 115200,
+  "serial_glob": "/dev/ttyACM*",
+  "timeout_sec": 120
+}
