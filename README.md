@@ -21,8 +21,10 @@ These notes are intended to make the development and validation process transpar
 * Common issues that can break balancing in the brain board project [[LINK](DOCS/balancing_failures.md)]
 * Firmware design choices that keep the balancing control loop deterministic [[LINK](DOCS/determinism_design.md)]
 * Measuring phase resistance, d-axis, and q-axis inductance of a BLDC Motor [[LINK](DOCS/BLDC_inductance_measurement.md)]
-* Prompt ChatGPT so it is less of a exhuberant cheerleader and more of a skeptical lab partner: [[LINK](DOCS/chatGPT_tips.md)]
+* Dial in ChatGPT to be skeptical lab partner: [[LINK](DOCS/chatGPT_tips.md)]
 * Development of the robot control board [[LINK](brainboardV1.2/README.md)]
+* OTA programming [[LINK](RPI_OTA_BRIDGE/README.md)]
+* Finalizing the modeling workflow [[LINK](modeling/README.md)]
 
 ## Not totally coherent discussions:
 * [LQR](DOCS/learn_LQR.md). 
@@ -30,8 +32,8 @@ These notes are intended to make the development and validation process transpar
 * Measuring jitter on the MESC [[LINK](DOCS/jitter_testing.md)] → none found at current operating speeds
 * Implementing CAN [[LINK](DOCS/CAN.md)]
 * Notes about MESC [[LINK](DOCS/MESC_control_variables.md)]
-* The inadequacies of [PID](DOCS/PID_position.md). 
-* How the brain board firmware works: [teensy code](DOCS/teensy_firmware_walkthrough.md). 
+* The inadequacies of PID [[LINK](DOCS/PID_position.md)]. 
+* General description of firmware: [LINK](DOCS/teensy_firmware_walkthrough.md). 
 * Brain board firmware [[LINK](DOCS/software_specs.md)]
 
 ## Laboratory notes, 2025
